@@ -39,7 +39,6 @@
 
 constexpr uint32 BOT_FOLLOW_DISTANCE_DEFAULT = 184; // as DSq value (~13.565 units)
 constexpr uint32 BOT_FOLLOW_DISTANCE_DEFAULT_MAX = 2500; // as DSq value (50 units)
-constexpr uint32 BOT_FOLLOW_DISTANCE_WALK = 1000; // as DSq value (~31.623 units)
 
 constexpr uint32 BOT_KEEP_ALIVE_INTERVAL = 5000; // 5 seconds
 
@@ -460,6 +459,8 @@ public:
 		uint8 botClass,
 		uint8 gender
 	);
+
+	void AddBotStartingItems(uint16 race_id, uint8 class_id);
 
 	// Static Bot Group Methods
 	static bool AddBotToGroup(Bot* bot, Group* group);

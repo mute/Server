@@ -4943,6 +4943,46 @@ ALTER TABLE `aa_ability` ADD COLUMN `auto_grant_enabled` TINYINT(4) NOT NULL DEF
 UPDATE `aa_ability` SET `auto_grant_enabled` = 1 WHERE `grant_only` = 0 AND `charges` = 0 AND `category` = -1;
 )"
 	},
+	ManifestEntry{
+		.version = 9237,
+		.description = "2023_10_15_import_13th_floor.sql",
+		.check = "SHOW COLUMNS FROM `items` LIKE 'bardeffect';",
+		.condition = "contains",
+		.match = "mediumint",
+		.sql = R"(
+ALTER TABLE `items`
+ MODIFY COLUMN `scriptfileid`        MEDIUMINT(6)     NOT NULL DEFAULT 0,
+ MODIFY COLUMN `powersourcecapacity` MEDIUMINT(7)     NOT NULL DEFAULT 0,
+ MODIFY COLUMN `augdistiller`        INT(11) UNSIGNED NOT NULL DEFAULT 0,
+ MODIFY COLUMN `scrollunk1`          INT(11) UNSIGNED NOT NULL DEFAULT 0,
+ MODIFY COLUMN `bardeffect`          MEDIUMINT(6)     NOT NULL DEFAULT 0;
+)"
+	},
+	ManifestEntry{
+		.version = 9238,
+		.description = "2023_10_18_tradeskill_add_learned_by_item_id.sql",
+		.check = "SHOW COLUMNS FROM `tradeskill_recipe` LIKE 'learned_by_item_id'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `tradeskill_recipe`
+	ADD COLUMN `learned_by_item_id` int(11) NOT NULL DEFAULT 0 AFTER `must_learn`;
+)"
+	},
+	ManifestEntry{
+		.version = 9239,
+		.description = "2023_10_18_blocked_spells_expansions_content_flags.sql",
+		.check = "SHOW COLUMNS FROM `blocked_spells` LIKE 'min_expansion'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `blocked_spells`
+ADD COLUMN `min_expansion` tinyint(4) NOT NULL DEFAULT -1 AFTER `description`,
+ADD COLUMN `max_expansion` tinyint(4) NOT NULL DEFAULT -1 AFTER `min_expansion`,
+ADD COLUMN `content_flags` varchar(100) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL AFTER `max_expansion`,
+ADD COLUMN `content_flags_disabled` varchar(100) CHARACTER SET latin1 COLLATE latin1_swedish_ci NULL DEFAULT NULL AFTER `content_flags`;
+)"
+	},
 
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{

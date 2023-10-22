@@ -288,8 +288,11 @@ Mob::Mob(
 
 	feigned = false;
 
+	int max_procs = MAX_PROCS;
+	m_max_procs = std::min(RuleI(Combat, MaxProcs), max_procs);
+
 	// clear the proc arrays
-	for (int j = 0; j < MAX_PROCS; j++) {
+	for (int j = 0; j < m_max_procs; j++) {
 		PermaProcs[j].spellID             = SPELL_UNKNOWN;
 		PermaProcs[j].chance              = 0;
 		PermaProcs[j].base_spellID        = SPELL_UNKNOWN;
@@ -511,6 +514,7 @@ Mob::Mob(
 	SetCanOpenDoors(true);
 
 	is_boat = IsBoat();
+
 }
 
 Mob::~Mob()
@@ -3460,10 +3464,10 @@ void Mob::ShowBuffs(Client* c) {
 	);
 
 	for (auto i = 0; i < GetMaxTotalSlots(); i++) {
-		const auto spell_id              = buffs[i].spellid;
-		const auto buff_duration_formula = spells[spell_id].buff_duration_formula;
+		const auto spell_id = buffs[i].spellid;
 		if (IsValidSpell(spell_id)) {
-			const auto is_permanent = (
+			const auto buff_duration_formula = spells[spell_id].buff_duration_formula;
+			const auto is_permanent          = (
 				buff_duration_formula == DF_Aura ||
 				buff_duration_formula == DF_Permanent
 			);
