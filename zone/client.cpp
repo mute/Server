@@ -500,8 +500,8 @@ void Client::SendZoneInPackets()
 		SendAppearancePacket(AT_PVP, GetPVP(false), true, false);
 
 	//Send AA Exp packet:
-	if (GetLevel() >= 51)
-		SendAlternateAdvancementStats();
+	// if (GetLevel() >= 51)
+	SendAlternateAdvancementStats();
 
 	// Send exp packets
 	outapp = new EQApplicationPacket(OP_ExpUpdate, sizeof(ExpUpdate_Struct));
