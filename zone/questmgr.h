@@ -250,6 +250,8 @@ public:
 	int collectitems_processSlot(int16 slot_id, uint32 item_id, bool remove);
 	int countitem(uint32 item_id);
 	void removeitem(uint32 item_id, uint32 quantity = 1);
+	std::string getitemcomment(uint32 item_id);
+	std::string getitemlore(uint32 item_id);
 	std::string getitemname(uint32 item_id);
 	void enabletitle(int titleset);
 	bool checktitle(int titlecheck);
@@ -363,8 +365,8 @@ public:
 	std::string GetEncounter() const;
 	inline bool ProximitySayInUse() { return HaveProximitySays; }
 
-	int createbotcount(uint8 class_id = NO_CLASS);
-	int spawnbotcount(uint8 class_id = NO_CLASS);
+	int createbotcount(uint8 class_id = Class::None);
+	int spawnbotcount(uint8 class_id = Class::None);
 	bool botquest();
 	bool createBot(const char *name, const char *lastname, uint8 level, uint16 race, uint8 botclass, uint8 gender);
 

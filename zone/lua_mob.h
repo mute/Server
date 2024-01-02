@@ -80,6 +80,7 @@ public:
 	bool RandomizeFeatures(bool send_illusion, bool save_variables);
 	void GMMove(double x, double y, double z);
 	void GMMove(double x, double y, double z, double heading);
+	void GMMove(double x, double y, double z, double heading, bool save_guard_spot);
 	void TryMoveAlong(float distance, float heading);
 	void TryMoveAlong(float distance, float heading, bool send);
 	bool HasProcs();
@@ -106,6 +107,7 @@ public:
 	int GetRace();
 	const char *GetClassName();
 	const char *GetRaceName();
+	const char* GetBaseRaceName();
 	int GetGender();
 	int GetTexture();
 	int GetHelmTexture();
@@ -223,6 +225,9 @@ public:
 	Lua_HateList GetHateListByDistance();
 	Lua_HateList GetHateListByDistance(uint32 distance);
 	Lua_Mob GetHateTop();
+	Lua_Bot GetHateTopBot();
+	Lua_Client GetHateTopClient();
+	Lua_NPC GetHateTopNPC();
 	Lua_Mob GetHateDamageTop(Lua_Mob other);
 	Lua_Mob GetHateRandom();
 	Lua_Bot GetHateRandomBot();

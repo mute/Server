@@ -100,6 +100,8 @@ EQEmuLogSys *EQEmuLogSys::LoadLogSettingsDefaults()
 	log_settings[Logs::Discord].log_to_console              = static_cast<uint8>(Logs::General);
 	log_settings[Logs::QuestErrors].log_to_gmsay            = static_cast<uint8>(Logs::General);
 	log_settings[Logs::QuestErrors].log_to_console          = static_cast<uint8>(Logs::General);
+	log_settings[Logs::EqTime].log_to_console               = static_cast<uint8>(Logs::General);
+	log_settings[Logs::EqTime].log_to_gmsay                 = static_cast<uint8>(Logs::General);
 
 	/**
 	 * RFC 5424
@@ -649,6 +651,9 @@ EQEmuLogSys *EQEmuLogSys::LoadLogDatabaseSettings()
 	}
 
 	// Auto inject categories that don't exist in the database...
+
+	std::vector<LogsysCategoriesRepository::LogsysCategories> db_categories_to_add{};
+
 	for (int i = Logs::AA; i != Logs::MaxCategoryID; i++) {
 
 		bool is_missing_in_database = std::find(db_categories.begin(), db_categories.end(), i) == db_categories.end();
@@ -663,11 +668,7 @@ EQEmuLogSys *EQEmuLogSys::LoadLogDatabaseSettings()
 		}
 
 		if (is_missing_in_database && !is_deprecated_category) {
-			LogInfo(
-				"Automatically adding new log category [{}] ({})",
-				Logs::LogCategoryName[i],
-				i
-			);
+			LogInfo("Automatically adding new log category [{}] ({})", Logs::LogCategoryName[i], i);
 
 			auto new_category = LogsysCategoriesRepository::NewEntity();
 			new_category.log_category_id          = i;
@@ -676,9 +677,14 @@ EQEmuLogSys *EQEmuLogSys::LoadLogDatabaseSettings()
 			new_category.log_to_gmsay             = log_settings[i].log_to_gmsay;
 			new_category.log_to_file              = log_settings[i].log_to_file;
 			new_category.log_to_discord           = log_settings[i].log_to_discord;
-
-			LogsysCategoriesRepository::InsertOne(*m_database, new_category);
+			db_categories_to_add.emplace_back(new_category);
 		}
+	}
+
+	if (!db_categories_to_add.empty()) {
+		LogsysCategoriesRepository::ReplaceMany(*m_database, db_categories_to_add);
+		LoadLogDatabaseSettings();
+		return this;
 	}
 
 	LogInfo("Loaded [{}] log categories", categories.size());

@@ -13,7 +13,6 @@ SET(common_sources
     crc32.cpp
     database/database_dump_service.cpp
     database.cpp
-    database_conversions.cpp
     database_instances.cpp
     database/database_update_manifest.cpp
     database/database_update_manifest_bots.cpp
@@ -541,7 +540,6 @@ SET(common_headers
     events/player_event_logs.h
     events/player_event_discord_formatter.h
     events/player_events.h
-    errmsg.h
     event_sub.h
     expedition_lockout_timer.h
     extprofile.h
@@ -792,5 +790,8 @@ IF (UNIX)
     SET_SOURCE_FILES_PROPERTIES("patches/sod.cpp" "patches/sof.cpp" "patches/rof.cpp" "patches/rof2.cpp" "patches/uf.cpp" PROPERTIES COMPILE_FLAGS -O0)
 ENDIF (UNIX)
 
+IF (WIN32 AND EQEMU_BUILD_PCH)
+    TARGET_PRECOMPILE_HEADERS(common PRIVATE pch/pch.h)
+ENDIF()
 
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)

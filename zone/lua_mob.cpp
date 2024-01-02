@@ -285,6 +285,11 @@ void Lua_Mob::GMMove(double x, double y, double z, double heading) {
 	self->GMMove(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(heading));
 }
 
+void Lua_Mob::GMMove(double x, double y, double z, double heading, bool save_guard_spot) {
+	Lua_Safe_Call_Void();
+	self->GMMove(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), static_cast<float>(heading), save_guard_spot);
+}
+
 void Lua_Mob::TryMoveAlong(float distance, float angle) {
 	Lua_Safe_Call_Void();
 	self->TryMoveAlong(distance, angle);
@@ -373,6 +378,11 @@ int Lua_Mob::GetRace() {
 const char *Lua_Mob::GetRaceName() {
 	Lua_Safe_Call_String();
 	return GetRaceIDName(self->GetRace());
+}
+
+const char* Lua_Mob::GetBaseRaceName() {
+	Lua_Safe_Call_String();
+	return GetRaceIDName(self->GetBaseRace());
 }
 
 int Lua_Mob::GetGender() {
@@ -1003,6 +1013,21 @@ Lua_HateList Lua_Mob::GetShuffledHateList() {
 Lua_Mob Lua_Mob::GetHateTop() {
 	Lua_Safe_Call_Class(Lua_Mob);
 	return Lua_Mob(self->GetHateTop());
+}
+
+Lua_Bot Lua_Mob::GetHateTopBot() {
+	Lua_Safe_Call_Class(Lua_Bot);
+	return Lua_Bot(self->GetHateTopBot());
+}
+
+Lua_Client Lua_Mob::GetHateTopClient() {
+	Lua_Safe_Call_Class(Lua_Client);
+	return Lua_Client(self->GetHateTopClient());
+}
+
+Lua_NPC Lua_Mob::GetHateTopNPC() {
+	Lua_Safe_Call_Class(Lua_NPC);
+	return Lua_NPC(self->GetHateTopNPC());
 }
 
 Lua_Mob Lua_Mob::GetHateDamageTop(Lua_Mob other) {
@@ -3345,6 +3370,7 @@ luabind::scope lua_register_mob() {
 	.def("FindType", (bool(Lua_Mob::*)(int,bool,int))&Lua_Mob::FindType)
 	.def("GMMove", (void(Lua_Mob::*)(double,double,double))&Lua_Mob::GMMove)
 	.def("GMMove", (void(Lua_Mob::*)(double,double,double,double))&Lua_Mob::GMMove)
+	.def("GMMove", (void(Lua_Mob::*)(double,double,double,double,bool))&Lua_Mob::GMMove)
 	.def("GetAA", (int(Lua_Mob::*)(int))&Lua_Mob::GetAA)
 	.def("GetAABonuses", &Lua_Mob::GetAABonuses)
 	.def("GetAAByAAID", (int(Lua_Mob::*)(int))&Lua_Mob::GetAAByAAID)
@@ -3386,6 +3412,7 @@ luabind::scope lua_register_mob() {
 	.def("GetCasterLevel", &Lua_Mob::GetCasterLevel)
 	.def("GetClass", &Lua_Mob::GetClass)
 	.def("GetClassName", &Lua_Mob::GetClassName)
+	.def("GetBaseRaceName", &Lua_Mob::GetBaseRaceName)
 	.def("GetClassPlural", &Lua_Mob::GetClassPlural)
 	.def("GetCleanName", &Lua_Mob::GetCleanName)
 	.def("GetCloseMobList", (Lua_Mob_List(Lua_Mob::*)(void))&Lua_Mob::GetCloseMobList)
@@ -3444,6 +3471,9 @@ luabind::scope lua_register_mob() {
 	.def("GetHateRandomClient", (Lua_Client(Lua_Mob::*)(void))&Lua_Mob::GetHateRandomClient)
 	.def("GetHateRandomNPC", (Lua_NPC(Lua_Mob::*)(void))&Lua_Mob::GetHateRandomNPC)
 	.def("GetHateTop", (Lua_Mob(Lua_Mob::*)(void))&Lua_Mob::GetHateTop)
+	.def("GetHateTopBot", (Lua_Bot(Lua_Mob::*)(void))&Lua_Mob::GetHateTopBot)
+	.def("GetHateTopClient", (Lua_Client(Lua_Mob::*)(void))&Lua_Mob::GetHateTopClient)
+	.def("GetHateTopNPC", (Lua_NPC(Lua_Mob::*)(void))&Lua_Mob::GetHateTopNPC)
 	.def("GetHeading", &Lua_Mob::GetHeading)
 	.def("GetHelmTexture", &Lua_Mob::GetHelmTexture)
 	.def("GetHerosForgeModel", (int32(Lua_Mob::*)(uint8))&Lua_Mob::GetHerosForgeModel)

@@ -611,11 +611,14 @@ public:
 	void SetPVPPoints(uint32 Points) { m_pp.PVPCurrentPoints = Points; }
 	uint32 GetPVPPoints() { return m_pp.PVPCurrentPoints; }
 	void AddPVPPoints(uint32 Points);
+	void AddEbonCrystals(uint32 amount, bool is_reclaim = false);
+	void AddRadiantCrystals(uint32 amount, bool is_reclaim = false);
+	void RemoveEbonCrystals(uint32 amount, bool is_reclaim = false);
+	void RemoveRadiantCrystals(uint32 amount, bool is_reclaim = false);
 	uint32 GetRadiantCrystals() { return m_pp.currentRadCrystals; }
 	void SetRadiantCrystals(uint32 value);
 	uint32 GetEbonCrystals() { return m_pp.currentEbonCrystals; }
 	void SetEbonCrystals(uint32 value);
-	void AddCrystals(uint32 Radiant, uint32 Ebon);
 	void SendCrystalCounts();
 
 	uint64 GetExperienceForKill(Mob *against);
@@ -908,6 +911,7 @@ public:
 	void AutoGrantAAPoints();
 	void GrantAllAAPoints(uint8 unlock_level = 0);
 	bool HasAlreadyPurchasedRank(AA::Rank* rank);
+	void ListPurchasedAAs(Client *to, std::string search_criteria = std::string());
 
 	bool SendGMCommand(std::string message, bool ignore_status = false);
 
@@ -978,11 +982,13 @@ public:
 	void PutLootInInventory(int16 slot_id, const EQ::ItemInstance &inst, ServerLootItem_Struct** bag_item_data = 0);
 	bool AutoPutLootInInventory(EQ::ItemInstance& inst, bool try_worn = false, bool try_cursor = true, ServerLootItem_Struct** bag_item_data = 0);
 	bool SummonItem(uint32 item_id, int16 charges = -1, uint32 aug1 = 0, uint32 aug2 = 0, uint32 aug3 = 0, uint32 aug4 = 0, uint32 aug5 = 0, uint32 aug6 = 0, bool attuned = false, uint16 to_slot = EQ::invslot::slotCursor, uint32 ornament_icon = 0, uint32 ornament_idfile = 0, uint32 ornament_hero_model = 0);
+	void SummonItemIntoInventory(uint32 item_id, int16 charges = -1, uint32 aug1 = 0, uint32 aug2 = 0, uint32 aug3 = 0, uint32 aug4 = 0, uint32 aug5 = 0, uint32 aug6 = 0, bool is_attuned = false);
 	void SummonBaggedItems(uint32 bag_item_id, const std::vector<ServerLootItem_Struct>& bag_items);
 	void SetStats(uint8 type,int16 set_val);
 	void IncStats(uint8 type,int16 increase_val);
 	void DropItem(int16 slot_id, bool recurse = true);
 	void DropItemQS(EQ::ItemInstance* inst, bool pickup);
+	bool HasItemOnCorpse(uint32 item_id);
 
 	bool IsAugmentRestricted(uint8 item_type, uint32 augment_restriction);
 
@@ -1274,6 +1280,10 @@ public:
 		}
 		else { return 0; }
 	}
+	inline bool CompleteTask(uint32 task_id)
+	{
+		return task_state ? task_state->CompleteTask(this, task_id) : false;
+	}
 	inline void FailTask(int task_id) { if (task_state) { task_state->FailTask(this, task_id); }}
 	inline int TaskTimeLeft(int task_id) { return (task_state ? task_state->TaskTimeLeft(task_id) : 0); }
 	inline int EnabledTaskCount(int task_set_id)
@@ -1488,7 +1498,7 @@ public:
 	void ConsentCorpses(std::string consent_name, bool deny = false);
 	void SendAltCurrencies();
 	void SetAlternateCurrencyValue(uint32 currency_id, uint32 new_amount);
-	int AddAlternateCurrencyValue(uint32 currency_id, int32 amount, int8 method = 0);
+	int AddAlternateCurrencyValue(uint32 currency_id, int amount, bool is_scripted = false);
 	void SendAlternateCurrencyValues();
 	void SendAlternateCurrencyValue(uint32 currency_id, bool send_if_null = true);
 	uint32 GetAlternateCurrencyValue(uint32 currency_id) const;
@@ -1809,9 +1819,12 @@ private:
 	bool dev_tools_enabled;
 
 	uint16 m_door_tool_entity_id;
+	uint16 m_object_tool_entity_id;
 public:
 	uint16 GetDoorToolEntityId() const;
 	void SetDoorToolEntityId(uint16 door_tool_entity_id);
+	uint16 GetObjectToolEntityId() const;
+	void SetObjectToolEntityId(uint16 object_tool_entity_id);
 private:
 
 	int32 max_end;
@@ -2037,14 +2050,14 @@ public:
 	bool GetBotPrecombat() { return m_bot_precombat; }
 	void SetBotPrecombat(bool flag = true) { m_bot_precombat = flag; }
 
-	int GetBotRequiredLevel(uint8 class_id = NO_CLASS);
-	uint32 GetBotCreationLimit(uint8 class_id = NO_CLASS);
-	int GetBotSpawnLimit(uint8 class_id = NO_CLASS);
-	void SetBotCreationLimit(uint32 new_creation_limit, uint8 class_id = NO_CLASS);
-	void SetBotRequiredLevel(int new_required_level, uint8 class_id = NO_CLASS);
-	void SetBotSpawnLimit(int new_spawn_limit, uint8 class_id = NO_CLASS);
+	int GetBotRequiredLevel(uint8 class_id = Class::None);
+	uint32 GetBotCreationLimit(uint8 class_id = Class::None);
+	int GetBotSpawnLimit(uint8 class_id = Class::None);
+	void SetBotCreationLimit(uint32 new_creation_limit, uint8 class_id = Class::None);
+	void SetBotRequiredLevel(int new_required_level, uint8 class_id = Class::None);
+	void SetBotSpawnLimit(int new_spawn_limit, uint8 class_id = Class::None);
 
-	void CampAllBots(uint8 class_id = NO_CLASS);
+	void CampAllBots(uint8 class_id = Class::None);
 	void SpawnRaidBotsOnConnect(Raid* raid);
 
 private:
