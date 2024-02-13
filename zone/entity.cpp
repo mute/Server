@@ -411,10 +411,12 @@ void EntityList::RaidProcess()
 
 void EntityList::DoorProcess()
 {
-#ifdef IDLE_WHEN_EMPTY
-	if (numclients < 1)
-		return;
-#endif
+	if (zone && zone->IsIdleWhenEmpty()) {
+		if (numclients < 1) {
+			return;
+		}
+	}
+
 	if (door_list.empty()) {
 		door_timer.Disable();
 		return;
@@ -480,46 +482,66 @@ void EntityList::MobProcess()
 
 		size_t sz = mob_list.size();
 
-#ifdef IDLE_WHEN_EMPTY
-		static int old_client_count=0;
+		static int   old_client_count  = 0;
 		static Timer *mob_settle_timer = new Timer();
 
-		if (numclients == 0 && old_client_count > 0 &&
-			RuleI(Zone, SecondsBeforeIdle) > 0) {
-			// Start Timer to allow any mobs that chased chars from zone
-			// to return home.
-			mob_settle_timer->Start(RuleI(Zone, SecondsBeforeIdle) * 1000);
-		}
+		if (zone->IsIdleWhenEmpty()) {
+			if (
+				numclients == 0 &&
+				old_client_count > 0 &&
+				zone->GetSecondsBeforeIdle() > 0
+			) {
+				LogInfo(
+					"Zone will go into an idle state after [{}] second{}.",
+					zone->GetSecondsBeforeIdle(),
+					zone->GetSecondsBeforeIdle() != 1 ? "s" : ""
+				);
+				mob_settle_timer->Start(zone->GetSecondsBeforeIdle() * 1000);
+			}
 
-		old_client_count = numclients;
+			if (numclients == 0 && mob_settle_timer->Check()) {
+				LogInfo(
+					"Zone has gone idle after [{}] second{}.",
+					zone->GetSecondsBeforeIdle(),
+					zone->GetSecondsBeforeIdle() != 1 ? "s" : ""
+				);
+				mob_settle_timer->Disable();
+			}
 
-		// Disable settle timer if someone zones into empty zone
-		if (numclients > 0 || mob_settle_timer->Check()) {
-			mob_settle_timer->Disable();
-		}
+			// Disable settle timer if someone zones into empty zone
+			if (numclients > 0 || mob_settle_timer->Check()) {
+				if (mob_settle_timer->Enabled()) {
+					LogInfo("Zone is no longer scheduled to go idle.");
+					mob_settle_timer->Disable();
+				}
+			}
 
-		Spawn2* s2 = mob->CastToNPC()->respawn2;
+			old_client_count = numclients;
 
-		// Perform normal mob processing if any of these are true:
-		//	-- zone is not empty
-		//	-- a quest has turned it on for this zone while zone is idle
-		//	-- the entity's spawn2 point is marked as path_while_zone_idle
-		//	-- the zone is newly empty and we're allowing mobs to settle
-		if (zone->process_mobs_while_empty || numclients > 0 ||
-			(s2 && s2->PathWhenZoneIdle()) || mob_settle_timer->Enabled()) {
+			Spawn2* s2 = mob->CastToNPC()->respawn2;
+
+			// Perform normal mob processing if any of these are true:
+			//	-- zone is not empty
+			//	-- the entity's spawn2 point is marked as path_while_zone_idle
+			//	-- the zone is newly empty and we're allowing mobs to settle
+			if (
+				numclients > 0 || zone->quest_idle_override ||
+				(s2 && s2->PathWhenZoneIdle()) ||
+				mob_settle_timer->Enabled()
+			) {
+				mob_dead = !mob->Process();
+			} else {
+				// spawn_events can cause spawns and deaths while zone empty.
+				// At the very least, process that.
+				mob_dead = mob->CastToNPC()->GetDepop();
+			}
+		} else {
 			mob_dead = !mob->Process();
 		}
-		else {
-			// spawn_events can cause spawns and deaths while zone empty.
-			// At the very least, process that.
-			mob_dead = mob->CastToNPC()->GetDepop();
-		}
-#else
-		mob_dead = !mob->Process();
-#endif
+
 		size_t a_sz = mob_list.size();
 
-		if(a_sz > sz) {
+		if (a_sz > sz) {
 			//increased size can potentially screw with iterators so reset it to current value
 			//if buckets are re-orderered we may skip a process here and there but since
 			//process happens so often it shouldn't matter much
@@ -529,30 +551,30 @@ void EntityList::MobProcess()
 			++it;
 		}
 
-		if(mob_dead) {
-			if(mob->IsMerc()) {
+		if (mob_dead) {
+			if (mob->IsMerc()) {
 				entity_list.RemoveMerc(id);
-			}
-			else if(mob->IsBot()) {
+			} else if (mob->IsBot()) {
 				entity_list.RemoveBot(id);
-			}
-			else if(mob->IsNPC()) {
+			} else if (mob->IsNPC()) {
 				entity_list.RemoveNPC(id);
-			}
-			else {
+			} else {
 #ifdef _WINDOWS
 				struct in_addr in;
 				in.s_addr = mob->CastToClient()->GetIP();
 				LogInfo("Dropping client: Process=false, ip=[{}] port=[{}]", inet_ntoa(in), mob->CastToClient()->GetPort());
 #endif
-				Group *g = GetGroupByMob(mob);
-				if(g) {
+
+				Group* g = GetGroupByMob(mob);
+				if (g) {
 					g->DelMember(mob);
 				}
-				Raid *r = entity_list.GetRaidByClient(mob->CastToClient());
-				if(r) {
+
+				Raid* r = entity_list.GetRaidByClient(mob->CastToClient());
+				if (r) {
 					r->MemberZoned(mob->CastToClient());
 				}
+
 				entity_list.RemoveClient(id);
 			}
 
@@ -680,8 +702,8 @@ void EntityList::AddNPC(NPC *npc, bool send_spawn_packet, bool dont_queue)
 		parse->EventNPC(EVENT_SPAWN, npc, nullptr, "", 0);
 	}
 
-	const auto emote_id = npc->GetEmoteID();
-	if (emote_id != 0) {
+	const uint32 emote_id = npc->GetEmoteID();
+	if (emote_id) {
 		npc->DoNPCEmote(EQ::constants::EmoteEventTypes::OnSpawn, emote_id);
 	}
 
@@ -2285,8 +2307,10 @@ void EntityList::ChannelMessageFromWorld(const char *from, const char *to,
 		if (chan_num == ChatChannel_Guild) {
 			if (!client->IsInGuild(guild_id))
 				continue;
-			if (!guild_mgr.CheckPermission(guild_id, client->GuildRank(), GUILD_HEAR))
-				continue;
+			if (client->ClientVersion() >= EQ::versions::ClientVersion::RoF) {
+				if (!guild_mgr.CheckPermission(guild_id, client->GuildRank(), GUILD_ACTION_GUILD_CHAT_SEE))
+					continue;
+			}
 			if (client->GetFilter(FilterGuildChat) == FilterHide)
 				continue;
 		} else if (chan_num == ChatChannel_OOC) {
@@ -2315,14 +2339,13 @@ void EntityList::Message(uint32 to_guilddbid, uint32 type, const char *message, 
 	}
 }
 
-void EntityList::QueueClientsGuild(Mob *sender, const EQApplicationPacket *app,
-		bool ignore_sender, uint32 guild_id)
+void EntityList::QueueClientsGuild(const EQApplicationPacket *app, uint32 guild_id)
 {
 	auto it = client_list.begin();
 	while (it != client_list.end()) {
 		Client *client = it->second;
 		if (client->IsInGuild(guild_id))
-			client->QueuePacket(app);
+			client->QueuePacket(app, true);
 		++it;
 	}
 }
@@ -4619,36 +4642,44 @@ void EntityList::GroupMessage(uint32 gid, const char *from, const char *message)
 	}
 }
 
-uint16 EntityList::CreateGroundObject(uint32 itemid, const glm::vec4& position, uint32 decay_time)
+uint16 EntityList::CreateGroundObject(uint32 item_id, const glm::vec4& position, uint32 decay_time)
 {
-	const EQ::ItemData *is = database.GetItem(itemid);
-	if (!is)
+	const auto is = database.GetItem(item_id);
+	if (!is) {
 		return 0;
+	}
 
-	auto i = new EQ::ItemInstance(is, is->MaxCharges);
-	if (!i)
+	auto inst = new EQ::ItemInstance(is, is->MaxCharges);
+	if (!inst) {
 		return 0;
+	}
 
-	auto object = new Object(i, position.x, position.y, position.z, position.w, decay_time);
+	auto object = new Object(inst, position.x, position.y, position.z, position.w, decay_time);
+
 	entity_list.AddObject(object, true);
 
-	safe_delete(i);
-	if (!object)
+	safe_delete(inst);
+
+	if (!object) {
 		return 0;
+	}
 
 	return object->GetID();
 }
 
 uint16 EntityList::CreateGroundObjectFromModel(const char *model, const glm::vec4& position, uint8 type, uint32 decay_time)
 {
-	if (!model)
+	if (!model) {
 		return 0;
+	}
 
 	auto object = new Object(model, position.x, position.y, position.z, position.w, type);
+
 	entity_list.AddObject(object, true);
 
-	if (!object)
+	if (!object) {
 		return 0;
+	}
 
 	return object->GetID();
 }

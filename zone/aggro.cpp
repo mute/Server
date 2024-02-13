@@ -285,24 +285,24 @@ void NPC::DescribeAggro(Client *to_who, Mob *mob, bool verbose) {
 			auto faction_name = content_db.GetFactionName(mob_faction_id);
 			bool has_entry = false;
 			for (auto faction : faction_list) {
-				if (static_cast<int>(faction->factionID) == mob_faction_id) {
+				if (static_cast<int>(faction.faction_id) == mob_faction_id) {
 					to_who->Message(
 						Chat::White,
 						fmt::format(
 							"{} has {} standing with Faction {} ({}) with their Faction Level of {}",
 							to_who->GetTargetDescription(mob),
 							(
-								faction->npc_value != 0 ?
+								faction.npc_value != 0 ?
 								(
-									faction->npc_value > 0 ?
+									faction.npc_value > 0 ?
 									"positive" :
 									"negative"
 								 ) :
 								"neutral"
 							),
 							faction_name,
-							faction->factionID,
-							faction->npc_value
+							faction.faction_id,
+							faction.npc_value
 						).c_str()
 					);
 					has_entry = true;
@@ -343,7 +343,7 @@ void NPC::DescribeAggro(Client *to_who, Mob *mob, bool verbose) {
 				"{} does not have low enough faction, their Faction Level is {} ({}).",
 				to_who->GetTargetDescription(mob),
 				FactionValueToString(faction_value),
-				faction_value
+				static_cast<int>(faction_value)
 			).c_str()
 		);
 		return;
@@ -556,7 +556,7 @@ bool Mob::CheckWillAggro(Mob *mob) {
 	LogAggro("Is In zone?:[{}]\n", mob->InZone());
 	LogAggro("Dist^2: [{}]\n", distance_squared);
 	LogAggro("Range^2: [{}]\n", aggro_range_squared);
-	LogAggro("Faction: [{}]\n", faction_value);
+	LogAggro("Faction: [{}]\n", static_cast<int>(faction_value));
 	LogAggro("AlwaysAggroFlag: [{}]\n", AlwaysAggro());
 	LogAggro("Int: [{}]\n", GetINT());
 	LogAggro("Con: [{}]\n", GetLevelCon(mob->GetLevel()));

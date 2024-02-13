@@ -166,6 +166,7 @@ void Client::Handle_OP_ZoneChange(const EQApplicationPacket *app) {
 					target_instance_id
 				).c_str()
 			);
+			LogZoning("Client [{}] Invalid zone instance request to zone id [{}]", GetCleanName(), target_zone_id);
 			SendZoneCancel(zc);
 			return;
 		}
@@ -179,6 +180,7 @@ void Client::Handle_OP_ZoneChange(const EQApplicationPacket *app) {
 					target_zone_id
 				).c_str()
 			);
+			LogZoning("Client [{}] Invalid zone instance request to zone id [{}]", GetCleanName(), target_zone_id);
 			SendZoneCancel(zc);
 			return;
 		}
@@ -744,7 +746,7 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 		z,
 		heading,
 		ignorerestrictions,
-		zm
+		static_cast<int>(zm)
 	);
 
 	cheat_manager.SetExemptStatus(Port, true);

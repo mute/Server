@@ -105,8 +105,8 @@ public:
 	void depop_withtimer(int npc_type = 0); // depop NPC and start spawn timer
 	void depopall(int npc_type = 0);
 	void depopzone(bool StartSpawnTimer = true);
-	void repopzone();
-	void processmobswhilezoneempty(bool on);
+	void repopzone(bool is_forced = false);
+	void processmobswhilezoneempty(bool quest_override_on);
 	void settarget(const char *type, int target_id);
 	void follow(int entity_id, int distance);
 	void sfollow();
@@ -183,7 +183,7 @@ public:
 	void enable_proximity_say();
 	void disable_proximity_say();
 	void setanim(int npc_type, int animnum);
-	void showgrid(int gridid);
+	void showgrid(int grid_id);
 	void spawn_condition(const char *zone_short, uint32 instance_id, uint16 condition_id, short new_value);
 	short get_spawn_condition(const char *zone_short, uint32 instance_id, uint16 condition_id);
 	void toggle_spawn_event(int event_id, bool enable, bool strict, bool reset_base);
@@ -193,9 +193,9 @@ public:
 	void sethp(int64 hpperc);
 	bool summonburiedplayercorpse(uint32 char_id, const glm::vec4& position);
 	bool summonallplayercorpses(uint32 char_id, const glm::vec4& position);
-	uint32 getplayerburiedcorpsecount(uint32 char_id);
-	int getplayercorpsecount(uint32 char_id);
-	int getplayercorpsecountbyzoneid(uint32 char_id, uint32 zone_id);
+	int64 getplayerburiedcorpsecount(uint32 char_id);
+	int64 getplayercorpsecount(uint32 character_id);
+	int64 getplayercorpsecountbyzoneid(uint32 character_id, uint32 zone_id);
 	bool buryplayercorpse(uint32 char_id);
 	void forcedooropen(uint32 doorid, bool altmode);
 	void forcedoorclose(uint32 doorid, bool altmode);
@@ -262,7 +262,7 @@ public:
 	void UpdateSpawnTimer(uint32 id, uint32 newTime);
 	void MerchantSetItem(uint32 NPCid, uint32 itemid, uint32 quantity = 0);
 	uint32 MerchantCountItem(uint32 NPCid, uint32 itemid);
-	uint16 CreateInstance(const char *zone_short_name, int16 instance_version, uint32 duration);
+	uint16 CreateInstance(const std::string& zone_short_name, int16 instance_version, uint32 duration);
 	void UpdateInstanceTimer(uint16 instance_id, uint32 new_duration);
 	void UpdateZoneHeader(std::string type, std::string value);
 	uint32 GetInstanceTimer();
@@ -270,7 +270,7 @@ public:
 	void DestroyInstance(uint16 instance_id);
 	uint16 GetInstanceID(const char *zone, int16 version);
 	std::vector<uint16> GetInstanceIDs(std::string zone_name, uint32 character_id = 0);
-	uint16 GetInstanceIDByCharID(const char *zone, int16 version, uint32 char_id);
+	uint16 GetInstanceIDByCharID(const std::string& zone_short_name, int16 instance_version, uint32 character_id);
 	void AssignToInstance(uint16 instance_id);
 	void AssignToInstanceByCharID(uint16 instance_id, uint32 char_id);
 	void AssignGroupToInstance(uint16 instance_id);
@@ -333,10 +333,10 @@ public:
 	void ClearNPCTypeCache(int npctype_id);
 	void ReloadZoneStaticData();
 	std::string gethexcolorcode(std::string color_name);
-	double GetAAEXPModifierByCharID(uint32 character_id, uint32 zone_id, int16 instance_version = -1) const;
-	double GetEXPModifierByCharID(uint32 character_id, uint32 zone_id, int16 instance_version = -1) const;
-	void SetAAEXPModifierByCharID(uint32 character_id, uint32 zone_id, double aa_modifier, int16 instance_version = -1);
-	void SetEXPModifierByCharID(uint32 character_id, uint32 zone_id, double exp_modifier, int16 instance_version = -1);
+	float GetAAEXPModifierByCharID(uint32 character_id, uint32 zone_id, int16 instance_version = -1) const;
+	float GetEXPModifierByCharID(uint32 character_id, uint32 zone_id, int16 instance_version = -1) const;
+	void SetAAEXPModifierByCharID(uint32 character_id, uint32 zone_id, float aa_modifier, int16 instance_version = -1);
+	void SetEXPModifierByCharID(uint32 character_id, uint32 zone_id, float exp_modifier, int16 instance_version = -1);
 	std::string getgendername(uint32 gender_id);
 	std::string getdeityname(uint32 deity_id);
 	std::string getinventoryslotname(int16 slot_id);

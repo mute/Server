@@ -71,14 +71,18 @@ public:
 	int GetBaseWIS();
 	int GetWeight();
 	uint32 GetEXP();
-	double GetEXPModifier(uint32 zone_id);
-	double GetEXPModifier(uint32 zone_id, int16 instance_version);
-	double GetAAEXPModifier(uint32 zone_id);
-	double GetAAEXPModifier(uint32 zone_id, int16 instance_version);
-	void SetAAEXPModifier(uint32 zone_id, double aa_modifier);
-	void SetAAEXPModifier(uint32 zone_id, double aa_modifier, int16 instance_version);
-	void SetEXPModifier(uint32 zone_id, double exp_modifier);
-	void SetEXPModifier(uint32 zone_id, double exp_modifier, int16 instance_version);
+	float GetEXPModifier();
+	float GetEXPModifier(uint32 zone_id);
+	float GetEXPModifier(uint32 zone_id, int16 instance_version);
+	float GetAAEXPModifier();
+	float GetAAEXPModifier(uint32 zone_id);
+	float GetAAEXPModifier(uint32 zone_id, int16 instance_version);
+	void SetAAEXPModifier(float aa_modifier);
+	void SetAAEXPModifier(uint32 zone_id, float aa_modifier);
+	void SetAAEXPModifier(uint32 zone_id, float aa_modifier, int16 instance_version);
+	void SetEXPModifier(float exp_modifier);
+	void SetEXPModifier(uint32 zone_id, float exp_modifier);
+	void SetEXPModifier(uint32 zone_id, float exp_modifier, int16 instance_version);
 	uint32 GetAAExp();
 	uint32 GetAAPercent();
 	uint32 GetTotalSecondsPlayed();
@@ -141,7 +145,7 @@ public:
 	bool TeleportRaidToPlayerByName(std::string player_name);
 	void ChangeLastName(std::string last_name);
 	int GetFactionLevel(uint32 char_id, uint32 npc_id, uint32 race, uint32 class_, uint32 deity, uint32 faction, Lua_NPC npc);
-	void SetFactionLevel(uint32 char_id, uint32 npc_id, int char_class, int char_race, int char_deity);
+	void SetFactionLevel(uint32 char_id, uint32 npc_faction_id, int char_class, int char_race, int char_deity);
 	void SetFactionLevel2(uint32 char_id, int faction_id, int char_class, int char_race, int char_deity, int value, int temp);
 	void RewardFaction(int id, int amount);
 	int GetRawItemAC();
@@ -361,7 +365,7 @@ public:
 	void LockSharedTask(bool lock);
 	void EndSharedTask();
 	void EndSharedTask(bool send_fail);
-	int GetCorpseCount();
+	int64 GetCorpseCount();
 	int GetCorpseID(int corpse);
 	int GetCorpseItemAt(int corpse, int slot);
 	void AssignToInstance(int instance_id);
@@ -489,6 +493,8 @@ public:
 	void SummonItemIntoInventory(luabind::object item_table);
 	bool HasItemOnCorpse(uint32 item_id);
 	void ClearXTargets();
+	int GetAAEXPPercentage();
+	int GetEXPPercentage();
 
 	void ApplySpell(int spell_id);
 	void ApplySpell(int spell_id, int duration);

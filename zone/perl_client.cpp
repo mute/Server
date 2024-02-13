@@ -344,9 +344,9 @@ int Perl_Client_GetFactionLevel(Client* self, uint32 char_id, uint32 npc_id, uin
 	return self->GetFactionLevel(char_id, npc_id, race_id, class_id, deity_id, faction_id, tnpc);
 }
 
-void Perl_Client_SetFactionLevel(Client* self, uint32 char_id, uint32 npc_id, uint8 char_class, uint8 char_race, uint8 char_deity) // @categories Faction
+void Perl_Client_SetFactionLevel(Client* self, uint32 char_id, uint32 npc_faction_id, uint8 char_class, uint8 char_race, uint8 char_deity) // @categories Faction
 {
-	self->SetFactionLevel(char_id, npc_id, char_class, char_race, char_deity);
+	self->SetFactionLevel(char_id, npc_faction_id, char_class, char_race, char_deity);
 }
 
 void Perl_Client_SetFactionLevel2(Client* self, uint32 char_id, int32 faction_id, uint8 char_class, uint8 char_race, uint8 char_deity, int32 value) // @categories Faction
@@ -1413,7 +1413,7 @@ void Perl_Client_EndSharedTask(Client* self, bool send_fail)
 	return self->EndSharedTask(send_fail);
 }
 
-uint32_t Perl_Client_GetCorpseCount(Client* self) // @categories Account and Character, Corpse
+int64_t Perl_Client_GetCorpseCount(Client* self) // @categories Account and Character, Corpse
 {
 	return self->GetCorpseCount();
 }
@@ -2121,42 +2121,62 @@ EQ::InventoryProfile* Perl_Client_GetInventory(Client* self)
 	return &self->GetInv();
 }
 
-double Perl_Client_GetAAEXPModifier(Client* self, uint32 zone_id)
+float Perl_Client_GetAAEXPModifier(Client* self)
+{
+	return zone->GetAAEXPModifier(self);
+}
+
+float Perl_Client_GetAAEXPModifier(Client* self, uint32 zone_id)
 {
 	return self->GetAAEXPModifier(zone_id);
 }
 
-double Perl_Client_GetAAEXPModifier(Client* self, uint32 zone_id, int16 instance_version)
+float Perl_Client_GetAAEXPModifier(Client* self, uint32 zone_id, int16 instance_version)
 {
 	return self->GetAAEXPModifier(zone_id, instance_version);
 }
 
-double Perl_Client_GetEXPModifier(Client* self, uint32 zone_id)
+float Perl_Client_GetEXPModifier(Client* self)
+{
+	return zone->GetEXPModifier(self);
+}
+
+float Perl_Client_GetEXPModifier(Client* self, uint32 zone_id)
 {
 	return self->GetEXPModifier(zone_id);
 }
 
-double Perl_Client_GetEXPModifier(Client* self, uint32 zone_id, int16 instance_version)
+float Perl_Client_GetEXPModifier(Client* self, uint32 zone_id, int16 instance_version)
 {
 	return self->GetEXPModifier(zone_id, instance_version);
 }
 
-void Perl_Client_SetAAEXPModifier(Client* self, uint32 zone_id, double aa_modifier)
+void Perl_Client_SetAAEXPModifier(Client* self, float aa_modifier)
+{
+	zone->SetAAEXPModifier(self, aa_modifier);
+}
+
+void Perl_Client_SetAAEXPModifier(Client* self, uint32 zone_id, float aa_modifier)
 {
 	self->SetAAEXPModifier(zone_id, aa_modifier);
 }
 
-void Perl_Client_SetAAEXPModifier(Client* self, uint32 zone_id, double aa_modifier, int16 instance_version)
+void Perl_Client_SetAAEXPModifier(Client* self, uint32 zone_id, float aa_modifier, int16 instance_version)
 {
 	self->SetAAEXPModifier(zone_id, aa_modifier, instance_version);
 }
 
-void Perl_Client_SetEXPModifier(Client* self, uint32 zone_id, double exp_modifier)
+void Perl_Client_SetEXPModifier(Client* self, float exp_modifier)
+{
+	zone->SetEXPModifier(self, exp_modifier);
+}
+
+void Perl_Client_SetEXPModifier(Client* self, uint32 zone_id, float exp_modifier)
 {
 	self->SetEXPModifier(zone_id, exp_modifier);
 }
 
-void Perl_Client_SetEXPModifier(Client* self, uint32 zone_id, double exp_modifier, int16 instance_version)
+void Perl_Client_SetEXPModifier(Client* self, uint32 zone_id, float exp_modifier, int16 instance_version)
 {
 	self->SetEXPModifier(zone_id, exp_modifier, instance_version);
 }
@@ -2243,14 +2263,14 @@ void Perl_Client_UntrainDiscBySpellID(Client* self, uint16 spell_id, bool update
 
 void Perl_Client_SummonBaggedItems(Client* self, uint32 bag_item_id, perl::reference bag_items_ref) // @categories Inventory and Items, Script Utility
 {
-	std::vector<ServerLootItem_Struct> bagged_items;
+	std::vector<LootItem> bagged_items;
 
 	perl::array bag_items = bag_items_ref;
 	for (perl::hash bag_item : bag_items) // only works if all elements are hashrefs
 	{
 		if (bag_item.exists("item_id") && bag_item.exists("charges"))
 		{
-			ServerLootItem_Struct item{};
+			LootItem item{};
 			item.item_id = bag_item["item_id"];
 			item.charges = bag_item["charges"];
 			item.attuned = bag_item.exists("attuned") ? bag_item["attuned"] : 0;
@@ -3068,6 +3088,16 @@ void Perl_Client_ClearXTargets(Client* self)
 	self->ClearXTargets();
 }
 
+int Perl_Client_GetAAEXPPercentage(Client* self)
+{
+	return self->GetAAEXPPercentage();
+}
+
+int Perl_Client_GetEXPPercentage(Client* self)
+{
+	return self->GetEXPPercentage();
+}
+
 void perl_register_client()
 {
 	perl::interpreter perl(PERL_GET_THX);
@@ -3181,8 +3211,10 @@ void perl_register_client()
 	package.add("ForageItem", &Perl_Client_ForageItem);
 	package.add("Freeze", &Perl_Client_Freeze);
 	package.add("GMKill", &Perl_Client_GMKill);
-	package.add("GetAAEXPModifier", (double(*)(Client*, uint32))&Perl_Client_GetAAEXPModifier);
-	package.add("GetAAEXPModifier", (double(*)(Client*, uint32, int16))&Perl_Client_GetAAEXPModifier);
+	package.add("GetAAEXPModifier", (float(*)(Client*))&Perl_Client_GetAAEXPModifier);
+	package.add("GetAAEXPModifier", (float(*)(Client*, uint32))&Perl_Client_GetAAEXPModifier);
+	package.add("GetAAEXPModifier", (float(*)(Client*, uint32, int16))&Perl_Client_GetAAEXPModifier);
+	package.add("GetAAEXPPercentage", &Perl_Client_GetAAEXPPercentage);
 	package.add("GetAAExp", &Perl_Client_GetAAExp);
 	package.add("GetAALevel", &Perl_Client_GetAALevel);
 	package.add("GetAAPercent", &Perl_Client_GetAAPercent);
@@ -3241,8 +3273,10 @@ void perl_register_client()
 	package.add("GetEnvironmentDamageModifier", &Perl_Client_GetEnvironmentDamageModifier);
 	package.add("GetEXP", &Perl_Client_GetEXP);
 	package.add("GetEXPForLevel", &Perl_Client_GetEXPForLevel);
-	package.add("GetEXPModifier", (double(*)(Client*, uint32))&Perl_Client_GetEXPModifier);
-	package.add("GetEXPModifier", (double(*)(Client*, uint32, int16))&Perl_Client_GetEXPModifier);
+	package.add("GetEXPModifier", (float(*)(Client*))&Perl_Client_GetEXPModifier);
+	package.add("GetEXPModifier", (float(*)(Client*, uint32))&Perl_Client_GetEXPModifier);
+	package.add("GetEXPModifier", (float(*)(Client*, uint32, int16))&Perl_Client_GetEXPModifier);
+	package.add("GetEXPPercentage", &Perl_Client_GetEXPPercentage);
 	package.add("GetEbonCrystals", &Perl_Client_GetEbonCrystals);
 	package.add("GetEndurance", &Perl_Client_GetEndurance);
 	package.add("GetEnduranceRatio", &Perl_Client_GetEnduranceRatio);
@@ -3472,8 +3506,9 @@ void perl_register_client()
 	package.add("SendToInstance", &Perl_Client_SendToInstance);
 	package.add("SendWebLink", &Perl_Client_SendWebLink);
 	package.add("SendZoneFlagInfo", &Perl_Client_SendZoneFlagInfo);
-	package.add("SetAAEXPModifier", (void(*)(Client*, uint32, double))&Perl_Client_SetAAEXPModifier);
-	package.add("SetAAEXPModifier", (void(*)(Client*, uint32, double, int16))&Perl_Client_SetAAEXPModifier);
+	package.add("SetAAEXPModifier", (void(*)(Client*, float))&Perl_Client_SetAAEXPModifier);
+	package.add("SetAAEXPModifier", (void(*)(Client*, uint32, float))&Perl_Client_SetAAEXPModifier);
+	package.add("SetAAEXPModifier", (void(*)(Client*, uint32, float, int16))&Perl_Client_SetAAEXPModifier);
 	package.add("SetAAPoints", &Perl_Client_SetAAPoints);
 	package.add("SetAATitle", (void(*)(Client*, std::string))&Perl_Client_SetAATitle);
 	package.add("SetAATitle", (void(*)(Client*, std::string, bool))&Perl_Client_SetAATitle);
@@ -3507,8 +3542,9 @@ void perl_register_client()
 	package.add("SetDueling", &Perl_Client_SetDueling);
 	package.add("SetEXP", (void(*)(Client*, uint64, uint64))&Perl_Client_SetEXP);
 	package.add("SetEXP", (void(*)(Client*, uint64, uint64, bool))&Perl_Client_SetEXP);
-	package.add("SetEXPModifier", (void(*)(Client*, uint32, double))&Perl_Client_SetEXPModifier);
-	package.add("SetEXPModifier", (void(*)(Client*, uint32, double, int16))&Perl_Client_SetEXPModifier);
+	package.add("SetEXPModifier", (void(*)(Client*, float))&Perl_Client_SetEXPModifier);
+	package.add("SetEXPModifier", (void(*)(Client*, uint32, float))&Perl_Client_SetEXPModifier);
+	package.add("SetEXPModifier", (void(*)(Client*, uint32, float, int16))&Perl_Client_SetEXPModifier);
 	package.add("SetEbonCrystals", &Perl_Client_SetEbonCrystals);
 	package.add("SetEndurance", &Perl_Client_SetEndurance);
 	package.add("SetEnvironmentDamageModifier", &Perl_Client_SetEnvironmentDamageModifier);

@@ -4844,7 +4844,7 @@ UPDATE data_buckets SET bot_id = SUBSTRING_INDEX(SUBSTRING_INDEX( `key`, '-', 2 
 			ADD COLUMN `marked_npc_3_zone_id` INT UNSIGNED NOT NULL DEFAULT '0' AFTER `marked_npc_3_entity_id`,
 			ADD COLUMN `marked_npc_3_instance_id` INT UNSIGNED NOT NULL DEFAULT '0' AFTER `marked_npc_3_zone_id`;
 		)"
-    },
+	},
 	ManifestEntry{
 		.version = 9235,
 		.description = "2023_07_31_character_stats_record.sql",
@@ -5175,7 +5175,197 @@ ALTER TABLE `task_activities`
 )",
 		.content_schema_update = true
 	},
+	ManifestEntry{
+		.version = 9251,
+		.description = "2023_01_12_instance_list_notes.sql",
+		.check = "SHOW COLUMNS FROM `instance_list` LIKE 'notes'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `instance_list`
+	ADD COLUMN `notes` varchar(50) NOT NULL DEFAULT '' AFTER `never_expires`;
+)",
+	},
+	ManifestEntry{
+		.version = 9252,
+		.description = "2024_01_07_zone_idle_when_empty.sql",
+		.check = "SHOW COLUMNS FROM `zone` LIKE 'idle_when_empty'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `zone`
+ADD COLUMN `idle_when_empty` tinyint(1) UNSIGNED NOT NULL DEFAULT 1 AFTER `min_lava_damage`,
+ADD COLUMN `seconds_before_idle` int(11) UNSIGNED NOT NULL DEFAULT 60 AFTER `idle_when_empty`;
+)",
+		.content_schema_update = true
+	},
+	ManifestEntry{
+		.version = 9253,
+		.description = "2024_01_13_merchantlist_slot.sql",
+		.check = "SHOW COLUMNS FROM `merchantlist` LIKE 'slot'",
+		.condition = "missing",
+		.match = "unsigned",
+		.sql = R"(
+ALTER TABLE `merchantlist`
+	MODIFY COLUMN `slot` int(11) UNSIGNED NOT NULL DEFAULT 0
+)",
+		.content_schema_update = true
+	},
+	ManifestEntry{
+		.version = 9254,
+		.description = "2024_01_13_merchantlist_temp_slot.sql",
+		.check = "SHOW COLUMNS FROM `merchantlist_temp` LIKE 'slot'",
+		.condition = "contains",
+		.match = "tinyint",
+		.sql = R"(
+ALTER TABLE `merchantlist_temp`
+	MODIFY COLUMN `slot` int(11) UNSIGNED NOT NULL DEFAULT 0
+)"
+	},
+	ManifestEntry{
+		.version = 9255,
+		.description = "2024_01_13_drop_item_tick_deprecated.sql",
+		.check = "show tables like 'item_tick'",
+		.condition = "not_empty",
+		.match = "",
+		.sql = R"(
+DROP TABLE IF EXISTS item_tick
+)"
+	},
+	ManifestEntry{
+		.version = 9256,
+		.description = "2024_01_16_increase_spawngroup_size.sql",
+		.check = "SHOW COLUMNS FROM `spawngroup` LIKE 'name'",
+		.condition = "contains",
+		.match = "varchar(50)",
+		.sql = R"(
+ALTER TABLE `spawngroup`
+MODIFY COLUMN `name` varchar(200) CHARACTER SET latin1 COLLATE latin1_swedish_ci NOT NULL DEFAULT '' AFTER `id`;
+)",
+		.content_schema_update = true
+	},
+	ManifestEntry{
+		.version = 9257,
+		.description = "2024_01_16_ground_spawns_fix_z.sql",
+		.check = "SHOW COLUMNS FROM `ground_spawns` LIKE `fix_z`",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `ground_spawns`
+ADD COLUMN `fix_z` tinyint(1) UNSIGNED NOT NULL DEFAULT 1 AFTER `respawn_timer`;
+)",
+		.content_schema_update = true
+	},
+	ManifestEntry{
+		.version = 9258,
+		.description = "2024_02_04_base_data.sql",
+		.check = "SHOW COLUMNS FROM `base_data` LIKE `hp_regen`",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `base_data`
+CHANGE COLUMN `unk1` `hp_regen` double NOT NULL AFTER `end`,
+CHANGE COLUMN `unk2` `end_regen` double NOT NULL AFTER `hp_regen`,
+MODIFY COLUMN `level` tinyint(3) UNSIGNED NOT NULL FIRST,
+MODIFY COLUMN `class` tinyint(2) UNSIGNED NOT NULL AFTER `level`;
+)",
+		.content_schema_update = true
+	},
+	ManifestEntry{
+		.version = 9259,
+		.description = "2024_01_13_corpse_rez_overhaul.sql",
+		.check = "SHOW COLUMNS FROM `character_corpses` LIKE 'rez_time'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+ALTER TABLE `character_corpses`
+ADD COLUMN `rez_time` int(11) UNSIGNED NOT NULL DEFAULT 0 AFTER `wc_9`,
+ADD COLUMN `gm_exp` int(11) UNSIGNED NOT NULL DEFAULT 0 AFTER `rez_time`,
+ADD COLUMN `killed_by` int(11) UNSIGNED NOT NULL DEFAULT 0 AFTER `gm_exp`,
+ADD COLUMN `rezzable` tinyint(1) UNSIGNED NOT NULL DEFAULT 0 AFTER `killed_by`;
+)"
+	},
+	ManifestEntry{
+		.version = 9260,
+		.description = "2023_11_11_guild_features.sql",
+		.check = "SHOW TABLES LIKE 'guild_permissions'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `guild_permissions` (
+	`id` INT(11) NOT NULL AUTO_INCREMENT,
+	`perm_id` INT(11) NOT NULL DEFAULT '0',
+	`guild_id` INT(11) NOT NULL DEFAULT '0',
+	`permission` INT(11) NOT NULL DEFAULT '0',
+	PRIMARY KEY (`id`) USING BTREE,
+	UNIQUE INDEX `perm_id_guild_id` (`perm_id`, `guild_id`) USING BTREE
+)
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
 
+UPDATE guild_ranks SET title = 'Leader' WHERE `rank` = '1';
+UPDATE guild_ranks SET title = 'Senior Officer' WHERE `rank` = '2';
+UPDATE guild_ranks SET title = 'Officer' WHERE `rank` = '3';
+UPDATE guild_ranks SET title = 'Senior Member' WHERE `rank` = '4';
+UPDATE guild_ranks SET title = 'Member' WHERE `rank` = '5';
+UPDATE guild_ranks SET title = 'Junior Member' WHERE `rank` = '6';
+UPDATE guild_ranks SET title = 'Initiate' WHERE `rank` = '7';
+UPDATE guild_ranks SET title = 'Recruit' WHERE `rank` = '8';
+
+DELETE FROM guild_ranks WHERE `rank` = 0;
+
+ALTER TABLE `guild_ranks`
+	DROP COLUMN `can_hear`,
+	DROP COLUMN `can_speak`,
+	DROP COLUMN `can_invite`,
+	DROP COLUMN `can_remove`,
+	DROP COLUMN `can_promote`,
+	DROP COLUMN `can_demote`,
+	DROP COLUMN `can_motd`,
+	DROP COLUMN `can_warpeace`;
+
+UPDATE guild_members SET `rank` = '5' WHERE `rank` = '0';
+UPDATE guild_members SET `rank` = '3' WHERE `rank` = '1';
+UPDATE guild_members SET `rank` = '1' WHERE `rank` = '2';
+
+ALTER TABLE `guild_members`
+	ADD COLUMN `online` TINYINT(3) UNSIGNED NOT NULL DEFAULT '0' AFTER `alt`;
+
+ALTER TABLE `guilds`
+	ADD COLUMN `favor` INT(10) UNSIGNED NOT NULL DEFAULT '0' AFTER `url`;
+
+CREATE TABLE guild_tributes (
+  guild_id int(11) unsigned NOT NULL DEFAULT 0,
+  tribute_id_1 int(11) unsigned NOT NULL DEFAULT 0,
+  tribute_id_1_tier int(11) unsigned NOT NULL DEFAULT 0,
+  tribute_id_2 int(11) unsigned NOT NULL DEFAULT 0,
+  tribute_id_2_tier int(11) unsigned NOT NULL DEFAULT 0,
+  time_remaining int(11) unsigned NOT NULL DEFAULT 0,
+  enabled int(11) unsigned NOT NULL DEFAULT 0,
+  PRIMARY KEY (guild_id) USING BTREE
+) ENGINE=InnoDB;
+)"
+	},
+	ManifestEntry{
+		.version = 9261,
+		.description = "2024_02_11_character_corpses.sql",
+		.check = "SHOW COLUMNS FROM `character_corpses` LIKE 'time_of_death'",
+		.condition = "contains",
+		.match = "0000-00-00 00:00:00",
+		.sql = R"(
+ALTER TABLE `character_corpses` MODIFY COLUMN `time_of_death` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP;
+		)"
+	},
+	ManifestEntry{
+		.version = 9262,
+		.description = "2024_02_11_object_contents.sql",
+		.check = "SHOW COLUMNS FROM `object_contents` LIKE 'droptime'",
+		.condition = "contains",
+		.match = "0000-00-00 00:00:00",
+		.sql = R"(
+ALTER TABLE `object_contents` MODIFY COLUMN `droptime` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP;
+		)"
+	}
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,
