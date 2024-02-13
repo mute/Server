@@ -131,7 +131,7 @@ public:
 	Bot(uint32 botID, uint32 botOwnerCharacterID, uint32 botSpellsID, double totalPlayTime, uint32 lastZoneId, NPCType *npcTypeData, int32 expansion_bitmask);
 
 	//abstract virtual override function implementations requird by base abstract class
-	bool Death(Mob* killerMob, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill) override;
+	bool Death(Mob* killer_mob, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, KilledByTypes killed_by = KilledByTypes::Killed_NPC) override;
 	void Damage(Mob* from, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, bool avoidable = true, int8 buffslot = -1,
 		bool iBuffTic = false, eSpecialAttacks special = eSpecialAttacks::None) override;
 
@@ -386,8 +386,8 @@ public:
 	bool CheckDataBucket(std::string bucket_name, const std::string& bucket_value, uint8 bucket_comparison);
 
 	// Bot Equipment & Inventory Class Methods
-	void BotTradeAddItem(const EQ::ItemInstance* inst, uint16 slot_id, std::string* error_message, bool save_to_database = true);
-	void EquipBot(std::string* error_message);
+	void BotTradeAddItem(const EQ::ItemInstance* inst, uint16 slot_id, bool save_to_database = true);
+	void EquipBot();
 	bool CheckLoreConflict(const EQ::ItemData* item);
 	void UpdateEquipmentLight() override
 		{
@@ -704,7 +704,8 @@ public:
 		uint32 attack
 	);
 	void BotRemoveEquipItem(uint16 slot_id);
-	void RemoveBotItemBySlot(uint16 slot_id, std::string* error_message);
+	void RemoveBotItemBySlot(uint16 slot_id
+);
 	void AddBotItem(
 		uint16 slot_id,
 		uint32 item_id,
@@ -780,12 +781,15 @@ public:
 	Mob* SetFollowMob(Client* leash_owner);
 
 	Mob* GetBotTarget(Client* bot_owner);
-	void AcquireBotTarget(Group* bot_group, Raid* raid, Client* leash_owner, float leash_distance);
-	void SetBotTarget(Client* bot_owner, Raid* raid, Group* bot_group, Client* leash_owner, float lo_distance, float leash_distance, bool bo_alt_combat);
-	void SetLeashOwnerTarget(Client* leash_owner, Client* bot_owner, float lo_distance, float leash_distance);
 	void SetOwnerTarget(Client* bot_owner);
-	void SetBotGroupTarget(const Client* bot_owner, Client* leash_owner, float lo_distance, float leash_distance, Mob* const& bg_member, Mob* bgm_target);
-	bool IsValidTarget(Client* bot_owner, Client* leash_owner, float lo_distance, float leash_distance, bool bo_alt_combat, Mob* tar, float tar_distance);
+	bool IsValidTarget(
+		Client* bot_owner,
+		Client* leash_owner,
+		float lo_distance,
+		float leash_distance,
+		Mob* tar,
+		float tar_distance
+	);
 
 	bool PullingFlagChecks(Client* bot_owner);
 	bool ReturningFlagChecks(Client* bot_owner, float fm_distance);
@@ -878,7 +882,6 @@ private:
 	int32	end_regen;
 
 	Timer m_evade_timer; // can be moved to pTimers at some point
-	Timer m_alt_combat_hate_timer;
 	Timer m_auto_defend_timer;
 	Timer auto_save_timer;
 	bool m_dirtyautohaters;
@@ -938,7 +941,7 @@ private:
 	void SetReturningFlag(bool flag = true) { m_returning_flag = flag; }
 
 	// Private "Inventory" Methods
-	void GetBotItems(EQ::InventoryProfile &inv, std::string* error_message);
+	void GetBotItems(EQ::InventoryProfile &inv);
 	void BotAddEquipItem(uint16 slot_id, uint32 item_id);
 
 	// Private "Pet" Methods

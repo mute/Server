@@ -177,6 +177,10 @@ bool Client::Process() {
 			if (myraid) {
 				myraid->MemberZoned(this);
 			}
+			if (IsInAGuild()) {
+				guild_mgr.UpdateDbMemberOnline(CharacterID(), false);
+				guild_mgr.SendToWorldSendGuildMembersList(GuildID());
+			}
 
 			SetDynamicZoneMemberStatus(DynamicZoneMemberStatus::Offline);
 
@@ -196,6 +200,11 @@ bool Client::Process() {
 			}
 			LeaveGroup();
 			Save();
+			if (IsInAGuild()) {
+				guild_mgr.UpdateDbMemberOnline(CharacterID(), false);
+				guild_mgr.SendToWorldSendGuildMembersList(GuildID());
+			}
+
 			if (GetMerc())
 			{
 				GetMerc()->Save();
@@ -525,11 +534,6 @@ bool Client::Process() {
 				CalcBonuses();
 			}
 
-			if (ItemTickTimer.Check())
-			{
-				TickItemCheck();
-			}
-
 			if (ItemQuestTimer.Check())
 			{
 				ItemTimerCheck();
@@ -565,6 +569,10 @@ bool Client::Process() {
 			if (GetMerc()) {
 				GetMerc()->Save();
 				GetMerc()->Depop();
+			}
+			if (IsInAGuild()) {
+				guild_mgr.UpdateDbMemberOnline(CharacterID(), false);
+				guild_mgr.SendToWorldSendGuildMembersList(GuildID());
 			}
 			return false;
 		}
@@ -1029,7 +1037,7 @@ void Client::OPRezzAnswer(uint32 Action, uint32 SpellID, uint16 ZoneID, uint16 I
 	{
 		// Mark the corpse as rezzed in the database, just in case the corpse has buried, or the zone the
 		// corpse is in has shutdown since the rez spell was cast.
-		database.MarkCorpseAsRezzed(PendingRezzDBID);
+		database.MarkCorpseAsResurrected(PendingRezzDBID);
 		LogSpells("Player [{}] got a [{}] Rezz spellid [{}] in zone[{}] instance id [{}]",
 				name, (uint16)spells[SpellID].base_value[0],
 				SpellID, ZoneID, InstanceID);
@@ -1054,18 +1062,21 @@ void Client::OPRezzAnswer(uint32 Action, uint32 SpellID, uint16 ZoneID, uint16 I
 				RuleI(Character, OldResurrectionSicknessSpellID) :
 				RuleI(Character, ResurrectionSicknessSpellID)
 			);
-			SpellOnTarget(resurrection_sickness_spell_id, this); // Rezz effects
-		}
-		else {
+			SpellOnTarget(resurrection_sickness_spell_id, this);
+		} else if (SpellID == SPELL_DIVINE_REZ) {
 			SetHP(GetMaxHP());
 			SetMana(GetMaxMana());
+			SetEndurance(GetMaxEndurance());
+		} else {
+			SetHP(GetMaxHP() / 20);
+			SetMana(GetMaxMana() / 20);
+			SetEndurance(GetMaxEndurance() / 20);
 		}
-		if(spells[SpellID].base_value[0] < 100 && spells[SpellID].base_value[0] > 0 && PendingRezzXP > 0)
-		{
+		
+		if(spells[SpellID].base_value[0] < 100 && spells[SpellID].base_value[0] > 0 && PendingRezzXP > 0) {
 				SetEXP(((int)(GetEXP()+((float)((PendingRezzXP / 100) * spells[SpellID].base_value[0])))),
 						GetAAXP(),true);
-		}
-		else if (spells[SpellID].base_value[0] == 100 && PendingRezzXP > 0) {
+		} else if (spells[SpellID].base_value[0] == 100 && PendingRezzXP > 0) {
 			SetEXP((GetEXP() + PendingRezzXP), GetAAXP(), true);
 		}
 

@@ -85,7 +85,6 @@ Bot::Bot(NPCType *npcTypeData, Client* botOwner) : NPC(npcTypeData, nullptr, glm
 	SetShowHelm(true);
 	SetPauseAI(false);
 
-	m_alt_combat_hate_timer.Start(250);
 	m_auto_defend_timer.Disable();
 	SetGuardFlag(false);
 	SetHoldFlag(false);
@@ -205,7 +204,6 @@ Bot::Bot(
 	SetTaunting((GetClass() == Class::Warrior || GetClass() == Class::Paladin || GetClass() == Class::ShadowKnight) && (GetBotStance() == EQ::constants::stanceAggressive));
 	SetPauseAI(false);
 
-	m_alt_combat_hate_timer.Start(250);
 	m_auto_defend_timer.Disable();
 	SetGuardFlag(false);
 	SetHoldFlag(false);
@@ -228,17 +226,10 @@ Bot::Bot(
 	strcpy(name, GetCleanName());
 
 	memset(&_botInspectMessage, 0, sizeof(InspectMessage_Struct));
-	if (!database.botdb.LoadInspectMessage(GetBotID(), _botInspectMessage) && bot_owner)
-		bot_owner->Message(Chat::White, "%s for '%s'", BotDatabase::fail::LoadInspectMessage(), GetCleanName());
 
-	std::string error_message;
+	database.botdb.LoadInspectMessage(GetBotID(), _botInspectMessage);
 
-	EquipBot(&error_message);
-	if (!error_message.empty()) {
-		if (bot_owner)
-			bot_owner->Message(Chat::White, error_message.c_str());
-		error_message.clear();
-	}
+	EquipBot();
 
 	if (GetClass() == Class::Rogue) {
 		m_evade_timer.Start();
@@ -252,17 +243,12 @@ Bot::Bot(
 	GenerateBaseStats();
 
 	bot_timers.clear();
-	if (!database.botdb.LoadTimers(this) && bot_owner) {
-		bot_owner->Message(Chat::White, "%s for '%s'", BotDatabase::fail::LoadTimers(), GetCleanName());
-	}
+
+	database.botdb.LoadTimers(this);
 
 	LoadAAs();
 
-	if (!database.botdb.LoadBuffs(this)) {
-		if (bot_owner) {
-			bot_owner->Message(Chat::White, "&s for '%s'", BotDatabase::fail::LoadBuffs(), GetCleanName());
-		}
-	} else {
+	if (database.botdb.LoadBuffs(this)) {
 		//reapply some buffs
 		uint32 buff_count = GetMaxBuffSlots();
 		for (uint32 j1 = 0; j1 < buff_count; j1++) {
@@ -447,8 +433,9 @@ Bot::Bot(
 			SetMana(0);
 			SpellOnTarget(resurrection_sickness_spell_id, this); // Rezz effects
 		} else {
-			SetHP(GetMaxHP());
-			SetMana(GetMaxMana());
+			SetHP(GetMaxHP() / 20);
+			SetMana(GetMaxMana() / 20);
+			SetEndurance(GetMaxEndurance() / 20);
 		}
 	}
 
@@ -1335,38 +1322,23 @@ bool Bot::Save()
 	if (!bot_owner)
 		return false;
 
-	std::string error_message;
-
 	if (!GetBotID()) { // New bot record
 		uint32 bot_id = 0;
 		if (!database.botdb.SaveNewBot(this, bot_id) || !bot_id) {
-			bot_owner->Message(Chat::White, "%s '%s'", BotDatabase::fail::SaveNewBot(), GetCleanName());
 			return false;
 		}
 		SetBotID(bot_id);
 	}
 	else { // Update existing bot record
 		if (!database.botdb.SaveBot(this)) {
-			bot_owner->Message(Chat::White, "%s '%s'", BotDatabase::fail::SaveBot(), GetCleanName());
 			return false;
 		}
 	}
 
 	// All of these continue to process if any fail
-	if (!database.botdb.SaveBuffs(this))
-		bot_owner->Message(Chat::White, "%s for '%s'", BotDatabase::fail::SaveBuffs(), GetCleanName());
-	if (!database.botdb.SaveTimers(this))
-		bot_owner->Message(Chat::White, "%s for '%s'", BotDatabase::fail::SaveTimers(), GetCleanName());
-
-	if (!database.botdb.SaveStance(this)) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"Failed to save stance for '{}'.",
-				GetCleanName()
-			).c_str()
-		);
-	}
+	database.botdb.SaveBuffs(this);
+	database.botdb.SaveTimers(this);
+	database.botdb.SaveStance(this);
 
 	if (!SavePet())
 		bot_owner->Message(Chat::White, "Failed to save pet for '%s'", GetCleanName());
@@ -1382,7 +1354,6 @@ bool Bot::DeleteBot()
 	}
 
 	if (!database.botdb.DeleteHealRotation(GetBotID())) {
-		bot_owner->Message(Chat::White, "%s", BotDatabase::fail::DeleteHealRotation());
 		return false;
 	}
 
@@ -1413,65 +1384,23 @@ bool Bot::DeleteBot()
 		RemoveBotFromRaid(this);
 	}
 
-	std::string error_message;
-
 	if (!database.botdb.DeleteItems(GetBotID())) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"{} for '{}'.",
-				BotDatabase::fail::DeleteItems(),
-				GetCleanName()
-			).c_str()
-		);
 		return false;
 	}
 
 	if (!database.botdb.DeleteTimers(GetBotID())) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"{} for '{}'.",
-				BotDatabase::fail::DeleteTimers(),
-				GetCleanName()
-			).c_str()
-		);
 		return false;
 	}
 
 	if (!database.botdb.DeleteBuffs(GetBotID())) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"{} for '{}'.",
-				BotDatabase::fail::DeleteBuffs(),
-				GetCleanName()
-			).c_str()
-		);
 		return false;
 	}
 
 	if (!database.botdb.DeleteStance(GetBotID())) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"{} for '{}'.",
-				BotDatabase::fail::DeleteStance(),
-				GetCleanName()
-			).c_str()
-		);
 		return false;
 	}
 
 	if (!database.botdb.DeleteBot(GetBotID())) {
-		bot_owner->Message(
-			Chat::White,
-			fmt::format(
-				"{} '{}'",
-				BotDatabase::fail::DeleteBot(),
-				GetCleanName()
-			).c_str()
-		);
 		return false;
 	}
 
@@ -1511,20 +1440,16 @@ bool Bot::LoadPet()
 		}
 	}
 
-	std::string error_message;
-
 	uint32 pet_index = 0;
 	if (!database.botdb.LoadPetIndex(GetBotID(), pet_index)) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::LoadPetIndex(), GetCleanName());
 		return false;
 	}
 	if (!pet_index)
 		return true;
 
 	uint32 saved_pet_spell_id = 0;
-	if (!database.botdb.LoadPetSpellID(GetBotID(), saved_pet_spell_id)) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::LoadPetSpellID(), GetCleanName());
-	}
+	database.botdb.LoadPetSpellID(GetBotID(), saved_pet_spell_id);
+
 	if (!IsValidSpell(saved_pet_spell_id)) {
 		bot_owner->Message(Chat::White, "Invalid spell id for %s's pet", GetCleanName());
 		DeletePet();
@@ -1537,7 +1462,6 @@ bool Bot::LoadPet()
 	uint32 pet_spell_id = 0;
 
 	if (!database.botdb.LoadPetStats(GetBotID(), pet_name, pet_mana, pet_hp, pet_spell_id)) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::LoadPetStats(), GetCleanName());
 		return false;
 	}
 
@@ -1551,13 +1475,11 @@ bool Bot::LoadPet()
 
 	SpellBuff_Struct pet_buffs[PET_BUFF_COUNT];
 	memset(pet_buffs, 0, (sizeof(SpellBuff_Struct) * PET_BUFF_COUNT));
-	if (!database.botdb.LoadPetBuffs(GetBotID(), pet_buffs))
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::LoadPetBuffs(), GetCleanName());
+	database.botdb.LoadPetBuffs(GetBotID(), pet_buffs);
 
 	uint32 pet_items[EQ::invslot::EQUIPMENT_COUNT];
 	memset(pet_items, 0, (sizeof(uint32) * EQ::invslot::EQUIPMENT_COUNT));
-	if (!database.botdb.LoadPetItems(GetBotID(), pet_items))
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::LoadPetItems(), GetCleanName());
+	database.botdb.LoadPetItems(GetBotID(), pet_items);
 
 	pet_inst->SetPetState(pet_buffs, pet_items);
 	pet_inst->CalcBonuses();
@@ -1596,17 +1518,12 @@ bool Bot::SavePet()
 	std::string pet_name_str = pet_name;
 	safe_delete_array(pet_name)
 
-	std::string error_message;
-
 	if (!database.botdb.SavePetStats(GetBotID(), pet_name_str, pet_inst->GetMana(), pet_inst->GetHP(), pet_inst->GetPetSpellID())) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::SavePetStats(), GetCleanName());
 		return false;
 	}
 
-	if (!database.botdb.SavePetBuffs(GetBotID(), pet_buffs))
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::SavePetBuffs(), GetCleanName());
-	if (!database.botdb.SavePetItems(GetBotID(), pet_items))
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::SavePetItems(), GetCleanName());
+	database.botdb.SavePetBuffs(GetBotID(), pet_buffs);
+	database.botdb.SavePetItems(GetBotID(), pet_items);
 
 	return true;
 }
@@ -1617,18 +1534,13 @@ bool Bot::DeletePet()
 	if (!bot_owner)
 		return false;
 
-	std::string error_message;
-
 	if (!database.botdb.DeletePetItems(GetBotID())) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::DeletePetItems(), GetCleanName());
 		return false;
 	}
 	if (!database.botdb.DeletePetBuffs(GetBotID())) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::DeletePetBuffs(), GetCleanName());
 		return false;
 	}
 	if (!database.botdb.DeletePetStats(GetBotID())) {
-		bot_owner->Message(Chat::White, "%s for %s's pet", BotDatabase::fail::DeletePetStats(), GetCleanName());
 		return false;
 	}
 
@@ -2044,8 +1956,6 @@ void Bot::AI_Process()
 
 	HealRotationChecks();
 
-	bool bo_alt_combat = (RuleB(Bots, AllowOwnerOptionAltCombat) && bot_owner->GetBotOption(Client::booAltCombat));
-
 	if (GetAttackFlag()) { // Push owner's target onto our hate list
 		SetOwnerTarget(bot_owner);
 	}
@@ -2054,8 +1964,6 @@ void Bot::AI_Process()
 	}
 
 //ALT COMBAT (ACQUIRE HATE)
-
-	SetBotTarget(bot_owner, raid, bot_group, leash_owner, lo_distance, leash_distance, bo_alt_combat);
 
 	glm::vec3 Goal(0, 0, 0);
 
@@ -2082,12 +1990,6 @@ void Bot::AI_Process()
 			}
 		}
 
-// ALT COMBAT (ACQUIRE TARGET)
-
-		else if (bo_alt_combat && m_alt_combat_hate_timer.Check()) { // Find a mob from hate list to target
-			AcquireBotTarget(bot_group, nullptr, leash_owner, leash_distance);
-		}
-
 // DEFAULT (ACQUIRE TARGET)
 
 // VERIFY TARGET AND STANCE
@@ -2107,7 +2009,7 @@ void Bot::AI_Process()
 
 // TARGET VALIDATION
 
-		if (!IsValidTarget(bot_owner, leash_owner, lo_distance, leash_distance, bo_alt_combat, tar, tar_distance)) {
+		if (!IsValidTarget(bot_owner, leash_owner, lo_distance, leash_distance, tar, tar_distance)) {
 			return;
 		}
 
@@ -2769,17 +2671,29 @@ void Bot::CalcMeleeDistances(const Mob* tar, const EQ::ItemInstance* const& p_it
 	}
 }
 
-bool Bot::IsValidTarget(Client* bot_owner, Client* leash_owner, float lo_distance, float leash_distance, bool bo_alt_combat, Mob* tar, float tar_distance) {
-
+bool Bot::IsValidTarget(
+	Client* bot_owner,
+	Client* leash_owner,
+	float lo_distance,
+	float leash_distance,
+	Mob* tar,
+	float tar_distance
+)
+{
 	if (!tar || !bot_owner || !leash_owner) {
 		return false;
 	}
 
-	bool valid_target_state = HOLDING || !tar->IsNPC() || tar->IsMezzed() || lo_distance > leash_distance || tar_distance > leash_distance;
-	bool valid_target       = !GetAttackingFlag() && !CheckLosFN(tar) && !leash_owner->CheckLosFN(tar);
-	bool valid_bo_target    = !GetAttackingFlag() && NOT_PULLING_BOT && !leash_owner->AutoAttackEnabled() && !tar->GetHateAmount(this) && !tar->GetHateAmount(leash_owner);
+	const bool valid_target_state = (
+		HOLDING ||
+		!tar->IsNPC() ||
+		tar->IsMezzed() ||
+		lo_distance > leash_distance ||
+		tar_distance > leash_distance
+	);
+	const bool valid_target = !GetAttackingFlag() && !CheckLosFN(tar) && !leash_owner->CheckLosFN(tar);
 
-	if (valid_target_state || valid_target || !IsAttackAllowed(tar) || (bo_alt_combat && valid_bo_target)) {
+	if (valid_target_state || valid_target || !IsAttackAllowed(tar)) {
 		// Normally, we wouldn't want to do this without class checks..but, too many issues can arise if we let enchanter animation pets run rampant
 		if (HasPet()) {
 			GetPet()->RemoveFromHateList(tar);
@@ -2798,6 +2712,7 @@ bool Bot::IsValidTarget(Client* bot_owner, Client* leash_owner, float lo_distanc
 			SetPullingFlag(false);
 			SetReturningFlag(false);
 			bot_owner->SetBotPulling(false);
+
 			if (GetPet()) {
 				GetPet()->SetPetOrder(m_previous_pet_order);
 			}
@@ -2809,13 +2724,15 @@ bool Bot::IsValidTarget(Client* bot_owner, Client* leash_owner, float lo_distanc
 
 		return false;
 	}
+
 	return true;
 }
 
-Mob* Bot::GetBotTarget(Client* bot_owner) {
+Mob* Bot::GetBotTarget(Client* bot_owner)
+{
+	Mob* t = GetTarget();
 
-	Mob* tar = GetTarget();
-	if (!tar || PASSIVE) {
+	if (!t || PASSIVE) {
 		if (GetTarget()) {
 			SetTarget(nullptr);
 		}
@@ -2823,12 +2740,13 @@ Mob* Bot::GetBotTarget(Client* bot_owner) {
 		WipeHateList();
 		SetAttackFlag(false);
 		SetAttackingFlag(false);
-		if (PULLING_BOT) {
 
+		if (PULLING_BOT) {
 			// 'Flags' should only be set on the bot that is pulling
 			SetPullingFlag(false);
 			SetReturningFlag(false);
 			bot_owner->SetBotPulling(false);
+
 			if (GetPet()) {
 				GetPet()->SetPetOrder(m_previous_pet_order);
 			}
@@ -2838,84 +2756,8 @@ Mob* Bot::GetBotTarget(Client* bot_owner) {
 			BotMeditate(true);
 		}
 	}
-	return tar;
-}
 
-void Bot::AcquireBotTarget(Group* bot_group, Raid* raid, Client* leash_owner, float leash_distance) {// Group roles can be expounded upon in the future
-	Mob* assist_mob = nullptr;
-	bool find_target = true;
-
-	if (raid) {
-		assist_mob = raid->GetRaidMainAssistOne();
-	}
-	else if (bot_group) {
-		assist_mob = entity_list.GetMob(bot_group->GetMainAssistName());
-	}
-
-
-	if (assist_mob) {
-		if (assist_mob->GetTarget()) {
-			if (assist_mob != this) {
-				if (GetTarget() != assist_mob->GetTarget()) {
-					SetTarget(assist_mob->GetTarget());
-				}
-
-				if (
-					HasPet() &&
-					(
-						GetClass() != Class::Enchanter ||
-						GetPet()->GetPetType() != petAnimation ||
-						GetAA(aaAnimationEmpathy) >= 2
-					)
-				) {
-					// This artificially inflates pet's target aggro..but, less expensive than checking hate each AI process
-					GetPet()->AddToHateList(assist_mob->GetTarget(), 1);
-					GetPet()->SetTarget(assist_mob->GetTarget());
-				}
-			}
-
-			find_target = false;
-		} else if (assist_mob != this) {
-			if (GetTarget()) {
-				SetTarget(nullptr);
-			}
-
-			if (
-				HasPet() &&
-				(
-					GetClass() != Class::Enchanter ||
-					GetPet()->GetPetType() != petAnimation ||
-					GetAA(aaAnimationEmpathy) >= 1
-				)
-			) {
-				GetPet()->WipeHateList();
-				GetPet()->SetTarget(nullptr);
-			}
-
-			find_target = false;
-		}
-	}
-
-	if (find_target) {
-		if (IsRooted()) {
-			auto closest = hate_list.GetClosestEntOnHateList(this, true);
-			if (closest) {
-				SetTarget(closest);
-			}
-		} else {
-			// This will keep bots on target for now..but, future updates will allow for rooting/stunning
-			if (auto escaping = hate_list.GetEscapingMobOnHateList(leash_owner, leash_distance)) {
-				SetTarget(escaping);
-			}
-
-			if (!GetTarget()) {
-				auto most_hate = hate_list.GetMobWithMostHateOnList(this, nullptr, true);
-				if (most_hate) {
-					SetTarget(most_hate);
-				}
-			}
-		}
-	}
+	return t;
 }
 
 bool Bot::ReturningFlagChecks(Client* bot_owner, float fm_distance) {// Need to make it back to group before clearing return flag
@@ -2977,42 +2819,6 @@ bool Bot::PullingFlagChecks(Client* bot_owner) {
 	}
 
 	return true;
-}
-
-void Bot::SetBotTarget(Client* bot_owner, Raid* raid, Group* bot_group, Client* leash_owner, float lo_distance, float leash_distance, bool bo_alt_combat) {
-
-	if (bo_alt_combat && m_alt_combat_hate_timer.Check(false)) {
-		// Empty hate list - let's find some aggro
-		if (bot_owner->IsEngaged() && !IsEngaged() && NOT_HOLDING && NOT_PASSIVE && (!bot_owner->GetBotPulling() || NOT_PULLING_BOT)) {
-			SetLeashOwnerTarget(leash_owner, bot_owner, lo_distance, leash_distance);
-		}
-		else if (!IsEngaged() && raid) {
-			for (const auto& raid_member : raid->members) {
-				if (!raid_member.member) {
-					continue;
-				}
-
-				auto rm_target = raid_member.member->GetTarget();
-				if (!rm_target || !rm_target->IsNPC()) {
-					continue;
-				}
-				SetBotGroupTarget(bot_owner, leash_owner, lo_distance, leash_distance, raid_member.member, rm_target);
-			}
-		}
-		else if (!IsEngaged() && bot_group) {
-			for (const auto& bg_member: bot_group->members) {
-				if (!bg_member) {
-					continue;
-				}
-
-				auto bgm_target = bg_member->GetTarget();
-				if (!bgm_target || !bgm_target->IsNPC()) {
-					continue;
-				}
-				SetBotGroupTarget(bot_owner, leash_owner, lo_distance, leash_distance, bg_member, bgm_target);
-			}
-		}
-	}
 }
 
 void Bot::HealRotationChecks() {
@@ -3149,26 +2955,6 @@ Client* Bot::SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint
 	return leash_owner;
 }
 
-void Bot::SetLeashOwnerTarget(Client* leash_owner, Client* bot_owner, float lo_distance, float leash_distance) {
-
-	Mob* lo_target = leash_owner->GetTarget();
-	if (lo_target &&
-		lo_target->IsNPC() &&
-		!lo_target->IsMezzed() &&
-		((bot_owner->GetBotOption(Client::booAutoDefend) && lo_target->GetHateAmount(leash_owner)) || leash_owner->AutoAttackEnabled()) &&
-		lo_distance <= leash_distance &&
-		DistanceSquared(m_Position, lo_target->GetPosition()) <= leash_distance &&
-		(CheckLosFN(lo_target) || leash_owner->CheckLosFN(lo_target)) &&
-		IsAttackAllowed(lo_target))
-	{
-		AddToHateList(lo_target, 1);
-		if (HasPet() && (GetClass() != Class::Enchanter || GetPet()->GetPetType() != petAnimation || GetAA(aaAnimationEmpathy) >= 2)) {
-			GetPet()->AddToHateList(lo_target, 1);
-			GetPet()->SetTarget(lo_target);
-		}
-	}
-}
-
 void Bot::SetOwnerTarget(Client* bot_owner) {
 	if (GetPet() && PULLING_BOT) {
 		GetPet()->SetPetOrder(m_previous_pet_order);
@@ -3237,22 +3023,6 @@ void Bot::BotPullerProcess(Client* bot_owner, Raid* raid) {
 				m_previous_pet_order = GetPet()->GetPetOrder();
 				GetPet()->SetPetOrder(SPO_Guard);
 			}
-		}
-	}
-}
-
-void Bot::SetBotGroupTarget(const Client* bot_owner, Client* leash_owner, float lo_distance, float leash_distance, Mob* const& bg_member, Mob* bgm_target) {
-	if (!bgm_target->IsMezzed() &&
-			((bot_owner->GetBotOption(Client::booAutoDefend) && bgm_target->GetHateAmount(bg_member)) || leash_owner->AutoAttackEnabled()) &&
-		lo_distance <= leash_distance &&
-		DistanceSquared(m_Position, bgm_target->GetPosition()) <= leash_distance &&
-		(CheckLosFN(bgm_target) || leash_owner->CheckLosFN(bgm_target)) &&
-		IsAttackAllowed(bgm_target))
-	{
-		AddToHateList(bgm_target, 1);
-		if (HasPet() && (GetClass() != Class::Enchanter || GetPet()->GetPetType() != petAnimation || GetAA(aaAnimationEmpathy) >= 2)) {
-			GetPet()->AddToHateList(bgm_target, 1);
-			GetPet()->SetTarget(bgm_target);
 		}
 	}
 }
@@ -3379,29 +3149,26 @@ bool Bot::Spawn(Client* botCharacterOwner) {
 }
 
 // Deletes the inventory record for the specified item from the database for this bot.
-void Bot::RemoveBotItemBySlot(uint16 slot_id, std::string *error_message)
+void Bot::RemoveBotItemBySlot(uint16 slot_id)
 {
 	if (!GetBotID()) {
 		return;
 	}
 
-	if (!database.botdb.DeleteItemBySlot(GetBotID(), slot_id)) {
-		*error_message = BotDatabase::fail::DeleteItemBySlot();
-	}
+	database.botdb.DeleteItemBySlot(GetBotID(), slot_id);
 
 	m_inv.DeleteItem(slot_id);
 	UpdateEquipmentLight();
 }
 
 // Retrieves all the inventory records from the database for this bot.
-void Bot::GetBotItems(EQ::InventoryProfile &inv, std::string* error_message)
+void Bot::GetBotItems(EQ::InventoryProfile &inv)
 {
 	if (!GetBotID()) {
 		return;
 	}
 
 	if (!database.botdb.LoadItems(GetBotID(), inv)) {
-		*error_message = BotDatabase::fail::LoadItems();
 		return;
 	}
 
@@ -3732,7 +3499,7 @@ void Bot::BotRemoveEquipItem(uint16 slot_id)
 	}
 }
 
-void Bot::BotTradeAddItem(const EQ::ItemInstance* inst, uint16 slot_id, std::string* error_message, bool save_to_database)
+void Bot::BotTradeAddItem(const EQ::ItemInstance* inst, uint16 slot_id, bool save_to_database)
 {
 	if (!inst) {
 		return;
@@ -3740,7 +3507,6 @@ void Bot::BotTradeAddItem(const EQ::ItemInstance* inst, uint16 slot_id, std::str
 
 	if (save_to_database) {
 		if (!database.botdb.SaveItemBySlot(this, slot_id, inst)) {
-			*error_message = BotDatabase::fail::SaveItemBySlot();
 			return;
 		}
 
@@ -3848,21 +3614,7 @@ void Bot::RemoveBotItem(uint32 item_id) {
 
 
 		if (inst->GetID() == item_id) {
-			std::string error_message;
-			RemoveBotItemBySlot(slot_id, &error_message);
-			if (!error_message.empty()) {
-				if (GetOwner()) {
-					GetOwner()->CastToClient()->Message(
-						Chat::White,
-						fmt::format(
-							"Database Error: {}",
-							error_message
-						).c_str()
-					);
-				}
-				return;
-			}
-
+			RemoveBotItemBySlot(slot_id);
 			BotRemoveEquipItem(slot_id);
 			CalcBotStats(GetOwner()->CastToClient()->GetBotOption(Client::booStatsUpdate));
 			return;
@@ -4585,20 +4337,24 @@ void Bot::PerformTradeWithClient(int16 begin_slot_id, int16 end_slot_id, Client*
 	}
 }
 
-bool Bot::Death(Mob *killerMob, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill) {
-	if (!NPC::Death(killerMob, damage, spell_id, attack_skill)) {
+bool Bot::Death(Mob *killer_mob, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, KilledByTypes killed_by)
+{
+	if (!NPC::Death(killer_mob, damage, spell_id, attack_skill)) {
 		return false;
 	}
 
 	Mob *my_owner = GetBotOwner();
+
 	if (my_owner && my_owner->IsClient() && my_owner->CastToClient()->GetBotOption(Client::booDeathMarquee)) {
-		if (killerMob)
-			my_owner->CastToClient()->SendMarqueeMessage(Chat::White, 510, 0, 1000, 3000, StringFormat("%s has been slain by %s", GetCleanName(), killerMob->GetCleanName()));
-		else
+		if (killer_mob) {
+			my_owner->CastToClient()->SendMarqueeMessage(Chat::White, 510, 0, 1000, 3000, StringFormat("%s has been slain by %s", GetCleanName(), killer_mob->GetCleanName()));
+		} else {
 			my_owner->CastToClient()->SendMarqueeMessage(Chat::White, 510, 0, 1000, 3000, StringFormat("%s has been slain", GetCleanName()));
+		}
 	}
 
 	const auto c = entity_list.GetCorpseByID(GetID());
+
 	if (c) {
 		c->Depop();
 	}
@@ -4612,19 +4368,19 @@ bool Bot::Death(Mob *killerMob, int64 damage, uint16 spell_id, EQ::skills::Skill
 	if (parse->BotHasQuestSub(EVENT_DEATH_COMPLETE)) {
 		const auto& export_string = fmt::format(
 			"{} {} {} {}",
-			killerMob ? killerMob->GetID() : 0,
+			killer_mob ? killer_mob->GetID() : 0,
 			damage,
 			spell_id,
 			static_cast<int>(attack_skill)
 		);
 
-		parse->EventBot(EVENT_DEATH_COMPLETE, this, killerMob, export_string, 0);
+		parse->EventBot(EVENT_DEATH_COMPLETE, this, killer_mob, export_string, 0);
 	}
 
 	Zone();
 	entity_list.RemoveBot(GetID());
 
-return true;
+	return true;
 }
 
 void Bot::Damage(Mob *from, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special) {
@@ -5389,18 +5145,15 @@ bool Bot::IsBotAttackAllowed(Mob* attacker, Mob* target, bool& hasRuleDefined) {
 	return Result;
 }
 
-void Bot::EquipBot(std::string* error_message) {
-	GetBotItems(m_inv, error_message);
+void Bot::EquipBot() {
+	GetBotItems(m_inv);
 	const EQ::ItemInstance* inst = nullptr;
 	const EQ::ItemData* item = nullptr;
 	for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
 		inst = GetBotItem(slot_id);
 		if (inst) {
 			item = inst->GetItem();
-			BotTradeAddItem(inst, slot_id, error_message, false);
-			if (!error_message->empty()) {
-				return;
-			}
+			BotTradeAddItem(inst, slot_id, false);
 		}
 	}
 	UpdateEquipmentLight();
@@ -8131,8 +7884,6 @@ bool Bot::DyeArmor(int16 slot_id, uint32 rgb, bool all_flag, bool save_flag)
 			save_slot = -2;
 
 		if (!database.botdb.SaveEquipmentColor(GetBotID(), save_slot, rgb)) {
-			if (GetBotOwner() && GetBotOwner()->IsClient())
-				GetBotOwner()->CastToClient()->Message(Chat::White, "%s", BotDatabase::fail::SaveEquipmentColor());
 			return false;
 		}
 	}
