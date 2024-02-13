@@ -87,7 +87,7 @@ void CheatManager::CheatDetected(CheatTypes type, glm::vec3 position1, glm::vec3
 				m_time_since_last_warp_detection.Start(2500);
 
 				// Move the player unpredictably in the zone
-				m_target->MovePC(position1.x + 31.0f, position1.y - 40.0f, position1.z + 1000.0f, 0.0f)
+				m_target->MovePC(position1.x + 31.0f, position1.y - 40.0f, position1.z + 1000.0f, 0.0f);
 			}
 			break;
 		case MQWarpShadowStep:
