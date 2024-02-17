@@ -398,7 +398,8 @@ int64 Mob::GetExtraSpellAmt(uint16 spell_id, int64 extra_spell_amt, int64 base_s
 	}
 
 	if (RuleB(Spells, ItemExtraSpellAmtCalcAsPercent)) {
-		return std::abs(base_spell_dmg) * extra_spell_amt / 100;
+		int max_bonus = std::abs(base_spell_dmg) / 2;
+		return std::min(extra_spell_amt, max_bonus);
 	}
 
 	return extra_spell_amt;
