@@ -6399,6 +6399,11 @@ void Mob::CommonOutgoingHitSuccess(Mob* defender, DamageHitInfo &hit, ExtraAttac
 				break;
 		}
 		hit.damage_done += extra;
+
+		if (itembonuses.ATK > 0) {
+			int max_bonus = std::abs(hit.damage_done) / 2;
+			hit.damage_done += std::min(itembonuses.ATK, max_bonus);
+		}
 	}
 
 	// this appears where they do special attack dmg mods
