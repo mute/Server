@@ -3880,7 +3880,7 @@ bool Client::CheckTripleAttack()
 	if (RuleB(Combat, ClassicTripleAttack)) {
 		if (
 			IsClient() &&
-			GetLevel() >= 60 &&
+			// GetLevel() >= 60 &&
 			(
 				GetClass() == Class::Warrior ||
 				GetClass() == Class::Ranger ||
