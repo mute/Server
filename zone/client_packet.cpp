@@ -3555,10 +3555,9 @@ void Client::Handle_OP_AutoFire(const EQApplicationPacket *app)
 		auto_fire = false;
 
 	auto_attack = false;
+	SetAttackTimer();
 	attack_timer.Disable();
 	attack_dw_timer.Disable();
-
-	SetAttackTimer();
 }
 
 void Client::Handle_OP_Bandolier(const EQApplicationPacket *app)
