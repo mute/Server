@@ -3506,6 +3506,8 @@ void Client::Handle_OP_AutoAttack(const EQApplicationPacket *app)
 	else if (app->pBuffer[0] == 1) {
 		auto_attack = true;
 		auto_fire   = false;
+		ranged_timer.Disable();
+
 		if (IsAIControlled()) {
 			return;
 		}
@@ -3553,6 +3555,9 @@ void Client::Handle_OP_AutoFire(const EQApplicationPacket *app)
 		auto_fire = false;
 
 	auto_attack = false;
+	attack_timer.Disable();
+	attack_dw_timer.Disable();
+
 	SetAttackTimer();
 }
 
