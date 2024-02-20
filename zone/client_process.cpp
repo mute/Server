@@ -349,10 +349,10 @@ bool Client::Process() {
 								if (CheckLosFN(GetTarget()) && CheckWaterAutoFireLoS(GetTarget())) {
 									//client has built in los check, but auto fire does not.. done last.
 									LogCombat("Attempting ranged attack");
-									RangedAttack(GetTarget());
-									if (CheckDoubleRangedAttack())
+									if (RangedAttack(GetTarget()) && CheckDoubleRangedAttack()) {
 										LogCombat("Attempting ranged double attack");
 										RangedAttack(GetTarget(), true);
+									}
 								}
 								else
 									ranged_timer.Start();
