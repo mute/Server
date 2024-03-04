@@ -3201,6 +3201,102 @@ uint32 Lua_Mob::GetMobTypeIdentifier()
 	return self->GetMobTypeIdentifier();
 }
 
+uint32 Lua_Mob::GetHateListCount()
+{
+	Lua_Safe_Call_Int();
+	return self->GetHateListCount();
+}
+
+uint32 Lua_Mob::GetHateListBotCount()
+{
+	Lua_Safe_Call_Int();
+	return self->GetHateListCount(HateListCountType::Bot);
+}
+
+uint32 Lua_Mob::GetHateListClientCount()
+{
+	Lua_Safe_Call_Int();
+	return self->GetHateListCount(HateListCountType::Client);
+}
+
+uint32 Lua_Mob::GetHateListNPCCount()
+{
+	Lua_Safe_Call_Int();
+	return self->GetHateListCount(HateListCountType::NPC);
+}
+
+bool Lua_Mob::IsAnimation()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsAnimation();
+}
+
+bool Lua_Mob::IsCharmed()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsCharmed();
+}
+
+bool Lua_Mob::IsFamiliar()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsFamiliar();
+}
+
+bool Lua_Mob::IsTargetLockPet()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsTargetLockPet();
+}
+
+bool Lua_Mob::IsPetOwnerBot()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsPetOwnerBot();
+}
+
+bool Lua_Mob::IsPetOwnerClient()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsPetOwnerClient();
+}
+
+bool Lua_Mob::IsPetOwnerNPC()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsPetOwnerNPC();
+}
+
+bool Lua_Mob::IsDestructibleObject()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsDestructibleObject();
+}
+
+bool Lua_Mob::IsBoat()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsBoat();
+}
+
+bool Lua_Mob::IsControllableBoat()
+{
+	Lua_Safe_Call_Bool();
+	return self->IsControllableBoat();
+}
+
+int Lua_Mob::GetHeroicStrikethrough()
+{
+	Lua_Safe_Call_Int();
+	return self->GetHeroicStrikethrough();
+}
+
+bool Lua_Mob::IsAlwaysAggro()
+{
+	Lua_Safe_Call_Bool();
+	return self->AlwaysAggro();
+}
+
 luabind::scope lua_register_mob() {
 	return luabind::class_<Lua_Mob, Lua_Entity>("Mob")
 	.def(luabind::constructor<>())
@@ -3460,12 +3556,16 @@ luabind::scope lua_register_mob() {
 	.def("GetHateList", &Lua_Mob::GetHateList)
 	.def("GetHateListBots", (Lua_HateList(Lua_Mob::*)(void))&Lua_Mob::GetHateListBots)
 	.def("GetHateListBots", (Lua_HateList(Lua_Mob::*)(uint32))&Lua_Mob::GetHateListBots)
+	.def("GetHateListBotCount", &Lua_Mob::GetHateListBotCount)
 	.def("GetHateListClients", (Lua_HateList(Lua_Mob::*)(void))&Lua_Mob::GetHateListClients)
 	.def("GetHateListClients", (Lua_HateList(Lua_Mob::*)(uint32))&Lua_Mob::GetHateListClients)
+	.def("GetHateListClientCount", &Lua_Mob::GetHateListClientCount)
 	.def("GetHateListNPCs", (Lua_HateList(Lua_Mob::*)(void))&Lua_Mob::GetHateListNPCs)
 	.def("GetHateListNPCs", (Lua_HateList(Lua_Mob::*)(uint32))&Lua_Mob::GetHateListNPCs)
+	.def("GetHateListNPCCount", &Lua_Mob::GetHateListNPCCount)
 	.def("GetHateListByDistance", (Lua_HateList(Lua_Mob::*)(void))&Lua_Mob::GetHateListByDistance)
 	.def("GetHateListByDistance", (Lua_HateList(Lua_Mob::*)(uint32))&Lua_Mob::GetHateListByDistance)
+	.def("GetHateListCount", &Lua_Mob::GetHateListCount)
 	.def("GetHateRandom", (Lua_Mob(Lua_Mob::*)(void))&Lua_Mob::GetHateRandom)
 	.def("GetHateRandomBot", (Lua_Bot(Lua_Mob::*)(void))&Lua_Mob::GetHateRandomBot)
 	.def("GetHateRandomClient", (Lua_Client(Lua_Mob::*)(void))&Lua_Mob::GetHateRandomClient)
@@ -3476,6 +3576,7 @@ luabind::scope lua_register_mob() {
 	.def("GetHateTopNPC", (Lua_NPC(Lua_Mob::*)(void))&Lua_Mob::GetHateTopNPC)
 	.def("GetHeading", &Lua_Mob::GetHeading)
 	.def("GetHelmTexture", &Lua_Mob::GetHelmTexture)
+	.def("GetHeroicStrikethrough", &Lua_Mob::GetHeroicStrikethrough)
 	.def("GetHerosForgeModel", (int32(Lua_Mob::*)(uint8))&Lua_Mob::GetHerosForgeModel)
 	.def("GetINT", &Lua_Mob::GetINT)
 	.def("GetInvisibleLevel", (uint8(Lua_Mob::*)(void))&Lua_Mob::GetInvisibleLevel)
@@ -3572,16 +3673,23 @@ luabind::scope lua_register_mob() {
 	.def("InterruptSpell", (void(Lua_Mob::*)(int))&Lua_Mob::InterruptSpell)
 	.def("InterruptSpell", (void(Lua_Mob::*)(void))&Lua_Mob::InterruptSpell)
 	.def("IsAIControlled", (bool(Lua_Mob::*)(void))&Lua_Mob::IsAIControlled)
+	.def("IsAlwaysAggro", &Lua_Mob::IsAlwaysAggro)
 	.def("IsAmnesiad", (bool(Lua_Mob::*)(void))&Lua_Mob::IsAmnesiad)
+	.def("IsAnimation", &Lua_Mob::IsAnimation)
 	.def("IsAttackAllowed", (bool(Lua_Mob::*)(Lua_Mob))&Lua_Mob::IsAttackAllowed)
 	.def("IsAttackAllowed", (bool(Lua_Mob::*)(Lua_Mob,bool))&Lua_Mob::IsAttackAllowed)
 	.def("IsBeneficialAllowed", (bool(Lua_Mob::*)(Lua_Mob))&Lua_Mob::IsBeneficialAllowed)
 	.def("IsBerserk", &Lua_Mob::IsBerserk)
 	.def("IsBlind", (bool(Lua_Mob::*)(void))&Lua_Mob::IsBlind)
+	.def("IsBoat", &Lua_Mob::IsBoat)
 	.def("IsCasting", &Lua_Mob::IsCasting)
+	.def("IsCharmed", &Lua_Mob::IsCharmed)
+	.def("IsControllableBoat", &Lua_Mob::IsControllableBoat)
+	.def("IsDestructibleObject", &Lua_Mob::IsDestructibleObject)
 	.def("IsEliteMaterialItem", (uint32(Lua_Mob::*)(uint8))&Lua_Mob::IsEliteMaterialItem)
 	.def("IsEngaged", (bool(Lua_Mob::*)(void))&Lua_Mob::IsEngaged)
 	.def("IsEnraged", (bool(Lua_Mob::*)(void))&Lua_Mob::IsEnraged)
+	.def("IsFamiliar", &Lua_Mob::IsFamiliar)
 	.def("IsFeared", (bool(Lua_Mob::*)(void))&Lua_Mob::IsFeared)
 	.def("IsFindable", (bool(Lua_Mob::*)(void))&Lua_Mob::IsFindable)
 	.def("IsHorse", &Lua_Mob::IsHorse)
@@ -3593,6 +3701,9 @@ luabind::scope lua_register_mob() {
 	.def("IsMoving", &Lua_Mob::IsMoving)
 	.def("IsPausedTimer", &Lua_Mob::IsPausedTimer)
 	.def("IsPet", (bool(Lua_Mob::*)(void))&Lua_Mob::IsPet)
+	.def("IsPetOwnerBot", &Lua_Mob::IsPetOwnerBot)
+	.def("IsPetOwnerClient", &Lua_Mob::IsPetOwnerClient)
+	.def("IsPetOwnerNPC", &Lua_Mob::IsPetOwnerNPC)
 	.def("IsRoamer", (bool(Lua_Mob::*)(void))&Lua_Mob::IsRoamer)
 	.def("IsRooted", (bool(Lua_Mob::*)(void))&Lua_Mob::IsRooted)
 	.def("IsRunning", (bool(Lua_Mob::*)(void))&Lua_Mob::IsRunning)
@@ -3600,6 +3711,7 @@ luabind::scope lua_register_mob() {
 	.def("IsStunned", (bool(Lua_Mob::*)(void))&Lua_Mob::IsStunned)
 	.def("IsTargetable", (bool(Lua_Mob::*)(void))&Lua_Mob::IsTargetable)
 	.def("IsTargeted", &Lua_Mob::IsTargeted)
+	.def("IsTargetLockPet", &Lua_Mob::IsTargetLockPet)
 	.def("IsTemporaryPet", &Lua_Mob::IsTemporaryPet)
 	.def("IsTrackable", (bool(Lua_Mob::*)(void))&Lua_Mob::IsTrackable)
 	.def("IsWarriorClass", &Lua_Mob::IsWarriorClass)
@@ -3789,7 +3901,9 @@ luabind::scope lua_register_special_abilities() {
 				luabind::value("modify_avoid_damage", static_cast<int>(MODIFY_AVOID_DAMAGE)),
 				luabind::value("immune_open", static_cast<int>(IMMUNE_OPEN)),
 				luabind::value("immune_assassinate", static_cast<int>(IMMUNE_ASSASSINATE)),
-				luabind::value("immune_headshot", static_cast<int>(IMMUNE_HEADSHOT))
+				luabind::value("immune_headshot", static_cast<int>(IMMUNE_HEADSHOT)),
+				luabind::value("immune_aggro_bot", static_cast<int>(IMMUNE_AGGRO_BOT)),
+				luabind::value("immune_damage_bot", static_cast<int>(IMMUNE_DAMAGE_BOT))
 		)];
 }
 

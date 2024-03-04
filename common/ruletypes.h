@@ -28,6 +28,9 @@
 #ifndef RULE_BOOL
 #define RULE_BOOL(cat, rule, default_value, notes)
 #endif
+#ifndef RULE_STRING
+#define RULE_STRING(cat, rule, default_value, notes)
+#endif
 #ifndef RULE_CATEGORY_END
 #define RULE_CATEGORY_END()
 #endif
@@ -48,10 +51,10 @@ RULE_BOOL(Character, DeathKeepLevel, false, "Players can not drop below 0% exper
 RULE_BOOL(Character, UseDeathExpLossMult, false, "Setting to control whether DeathExpLossMultiplier or the code default is used: (Level x Level / 18.0) x 12000")
 RULE_BOOL(Character, UseOldRaceRezEffects, false, "Older clients had ID 757 for races with high starting STR, but it doesn't seem used anymore")
 RULE_INT(Character, CorpseDecayTime, 604800000, "Time after which the corpse decays (milliseconds) DEFAULT: 604800000 (7 Days)")
-RULE_INT( Character, EmptyCorpseDecayTime, 10800000, "Time after which an empty corpse decays (milliseconds) DEFAULT: 10800000 (3 Hours)")
+RULE_INT(Character, EmptyCorpseDecayTime, 10800000, "Time after which an empty corpse decays (milliseconds) DEFAULT: 10800000 (3 Hours)")
 RULE_INT(Character, CorpseResTime, 10800000, "Time after which the corpse can no longer be resurrected (milliseconds) DEFAULT: 10800000 (3 Hours)")
-RULE_INT( Character, DuelCorpseResTime, 600000, "Time before cant res corpse after a duel (milliseconds) DEFAULT: 600000 (10 Minutes)")
-RULE_INT( Character, CorpseOwnerOnlineTime, 30000, "How often corpse will check if its owner is online DEFAULT: 30000 (30 Seconds)")
+RULE_INT(Character, DuelCorpseResTime, 600000, "Time before cant res corpse after a duel (milliseconds) DEFAULT: 600000 (10 Minutes)")
+RULE_INT(Character, CorpseOwnerOnlineTime, 30000, "How often corpse will check if its owner is online DEFAULT: 30000 (30 Seconds)")
 RULE_BOOL(Character, LeaveCorpses, true, "Setting whether you leave a corpse behind")
 RULE_BOOL(Character, LeaveNakedCorpses, false, "Setting whether you leave a corpse without items")
 RULE_INT(Character, MaxDraggedCorpses, 2, "Maximum number of corpses you can drag at once")
@@ -324,6 +327,8 @@ RULE_INT(World, MaximumQuestErrors, 30, "Changes the maximum number of quest err
 RULE_INT(World, BootHour, 0, "Sets the in-game hour world will set when it first boots. 0-24 are valid options, where 0 disables this rule")
 RULE_BOOL(World, UseItemLinksForKeyRing, false, "Uses item links for Key Ring Listing instead of item name")
 RULE_BOOL(World, UseOldShadowKnightClassExport, true, "Disable to have Shadowknight show as Shadow Knight (live-like)")
+RULE_STRING(World, IPExemptionZones, "", "Comma-delimited list of zones to exclude from IP-limit checks. Empty string to disable.")
+RULE_STRING(World, MOTD, "", "Server MOTD sent on login, change from empty to have this be used instead of variables table 'motd' value")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Zone)
@@ -495,6 +500,7 @@ RULE_BOOL(Spells, EvacClearCharmPet, false, "Enable to have evac in zone clear c
 RULE_BOOL(Spells, ManaTapsRequireNPCMana, false, "Enabling will require target to have mana to tap. Default off as many npc's are caster class with 0 mana and need fixed.")
 RULE_INT(Spells, HarmTouchCritRatio, 200, "Harmtouch crit bonus, on top of BaseCritRatio")
 RULE_BOOL(Spells, UseClassicSpellFocus, false, "Enabling will tell the server to handle random focus damage as classic spell imports lack the limit values.")
+RULE_BOOL(Spells, ManaTapsOnAnyClass, false, "Enabling this will allow you to cast mana taps on any class, this will bypass ManaTapsRequireNPCMana rule.")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Combat)
@@ -950,4 +956,5 @@ RULE_CATEGORY_END()
 #undef RULE_INT
 #undef RULE_REAL
 #undef RULE_BOOL
+#undef RULE_STRING
 #undef RULE_CATEGORY_END

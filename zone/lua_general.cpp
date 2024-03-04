@@ -5416,6 +5416,65 @@ void lua_self_cast(uint16 spell_id)
 	quest_manager.selfcast(spell_id);
 }
 
+uint8 lua_get_bot_class_by_id(uint32 bot_id)
+{
+	return database.botdb.GetBotClassByID(bot_id);
+}
+
+uint8 lua_get_bot_gender_by_id(uint32 bot_id)
+{
+	return database.botdb.GetBotGenderByID(bot_id);
+}
+
+luabind::object lua_get_bot_ids_by_character_id(lua_State* L, uint32 character_id)
+{
+	auto lua_table = luabind::newtable(L);
+
+	const auto& l = database.botdb.GetBotIDsByCharacterID(character_id);
+
+	if (!l.empty()) {
+		int index = 1;
+		for (const auto& i : l) {
+			lua_table[index] = i;
+			index++;
+		}
+	}
+
+	return lua_table;
+}
+
+luabind::object lua_get_bot_ids_by_character_id(lua_State* L, uint32 character_id, uint8 class_id)
+{
+	auto lua_table = luabind::newtable(L);
+
+	const auto& l = database.botdb.GetBotIDsByCharacterID(character_id, class_id);
+
+	if (!l.empty()) {
+		int index = 1;
+		for (const auto& i : l) {
+			lua_table[index] = i;
+			index++;
+		}
+	}
+
+	return lua_table;
+}
+
+uint8 lua_get_bot_level_by_id(uint32 bot_id)
+{
+	return database.botdb.GetBotLevelByID(bot_id);
+}
+
+std::string lua_get_bot_name_by_id(uint32 bot_id)
+{
+	return database.botdb.GetBotNameByID(bot_id);
+}
+
+uint16 lua_get_bot_race_by_id(uint32 bot_id)
+{
+	return database.botdb.GetBotRaceByID(bot_id);
+}
+
 #define LuaCreateNPCParse(name, c_type, default_value) do { \
 	cur = table[#name]; \
 	if(luabind::type(cur) != LUA_TNIL) { \
@@ -5592,6 +5651,10 @@ float get_ruler(int rule) {
 
 bool get_ruleb(int rule) {
 	return RuleManager::Instance()->GetBoolRule((RuleManager::BoolType)rule);
+}
+
+std::string get_rules(int rule) {
+	return RuleManager::Instance()->GetStringRule((RuleManager::StringType)rule);
 }
 
 luabind::scope lua_register_general() {
@@ -6199,6 +6262,13 @@ luabind::scope lua_register_general() {
 		luabind::def("convert_money_to_string", &lua_convert_money_to_string),
 		luabind::def("cast_spell", &lua_cast_spell),
 		luabind::def("self_cast", &lua_self_cast),
+		luabind::def("get_bot_class_by_id", &lua_get_bot_class_by_id),
+		luabind::def("get_bot_gender_by_id", &lua_get_bot_gender_by_id),
+		luabind::def("get_bot_ids_by_character_id", (luabind::object(*)(lua_State*, uint32))&lua_get_bot_ids_by_character_id),
+		luabind::def("get_bot_ids_by_character_id", (luabind::object(*)(lua_State*, uint32,uint8))&lua_get_bot_ids_by_character_id),
+		luabind::def("get_bot_level_by_id", &lua_get_bot_level_by_id),
+		luabind::def("get_bot_name_by_id", &lua_get_bot_name_by_id),
+		luabind::def("get_bot_race_by_id", &lua_get_bot_race_by_id),
 		/*
 			Cross Zone
 		*/
@@ -7178,7 +7248,13 @@ luabind::scope lua_register_rules_const() {
 #define RULE_BOOL(cat, rule, default_value, notes) \
 		luabind::value(#rule, RuleManager::Bool__##rule),
 #include "../common/ruletypes.h"
-		luabind::value("_BoolRuleCount", RuleManager::_BoolRuleCount)
+		luabind::value("_BoolRuleCount", RuleManager::_BoolRuleCount),
+#undef RULE_BOOL
+#define RULE_STRING(cat, rule, default_value, notes) \
+		luabind::value(#rule, RuleManager::String__##rule),
+#include "../common/ruletypes.h"
+		luabind::value("_StringRuleCount", RuleManager::_StringRuleCount)
+#undef RULE_STRING
 	)];
 }
 
@@ -7200,6 +7276,13 @@ luabind::scope lua_register_ruleb() {
 	return luabind::namespace_("RuleB")
 		[
 			luabind::def("Get", &get_ruleb)
+		];
+}
+
+luabind::scope lua_register_rules() {
+	return luabind::namespace_("RuleS")
+		[
+			luabind::def("Get", &get_rules)
 		];
 }
 

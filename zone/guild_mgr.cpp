@@ -514,14 +514,18 @@ void ZoneGuildManager::ProcessWorldPacket(ServerPacket *pack)
 		}
 		case ServerOP_GuildPermissionUpdate: {
 			if (is_zone_loaded) {
-				auto *sgpus = (ServerGuildPermissionUpdate_Struct *) pack->pBuffer;
-				auto                               res    = m_guilds.find(sgpus->guild_id);
-				if (sgpus->function_value) {
-					res->second->functions[sgpus->function_id].perm_value |= (1UL << (8 - sgpus->rank));
-				}
-				else {
-					res->second->functions[sgpus->function_id].perm_value &= ~(1UL << (8 - sgpus->rank));
-				}
+                auto *sgpus = (ServerGuildPermissionUpdate_Struct *)pack->pBuffer;
+                auto  guild = GetGuildByGuildID(sgpus->guild_id);
+                if (!guild) {
+                    return;
+                }
+
+                if (sgpus->function_value) {
+                    guild->functions[sgpus->function_id].perm_value |= (1UL << (8 - sgpus->rank));
+                }
+                else {
+                    guild->functions[sgpus->function_id].perm_value &= ~(1UL << (8 - sgpus->rank));
+                }
 
 				auto outapp  = new EQApplicationPacket(OP_GuildUpdate, sizeof(GuildPermission_Struct));
 				auto *guuacs = (GuildPermission_Struct *) outapp->pBuffer;
@@ -797,7 +801,7 @@ void GuildBankManager::SendGuildBank(Client *c)
 				outapp->WriteUInt32(Item->Icon);
 				if (Item->Stackable) {
 					outapp->WriteUInt32(guild_bank->Items.DepositArea[i].Quantity);
-					outapp->WriteUInt8(Item->StackSize == guild_bank->Items.DepositArea[i].Quantity ? 0 : 1);
+					outapp->WriteUInt8(Item->StackSize == guild_bank->Items.DepositArea[i].Quantity ? 1 : 1);
 				} else {
 					outapp->WriteUInt32(1);
 					outapp->WriteUInt8(0);
@@ -821,7 +825,7 @@ void GuildBankManager::SendGuildBank(Client *c)
 				outapp->WriteUInt32(Item->Icon);
 				if (Item->Stackable) {
 					outapp->WriteUInt32(guild_bank->Items.MainArea[i].Quantity);
-					outapp->WriteUInt8(Item->StackSize == guild_bank->Items.MainArea[i].Quantity ? 0 : 1);
+					outapp->WriteUInt8(Item->StackSize == guild_bank->Items.MainArea[i].Quantity ? 1 : 1);
 				} else {
 					outapp->WriteUInt32(1);
 					outapp->WriteUInt8(0);
@@ -858,7 +862,7 @@ void GuildBankManager::SendGuildBank(Client *c)
 			{
 				if(guild_bank->Items.DepositArea[i].Quantity == Item->StackSize)
 					gbius->Init(GuildBankItemUpdate, 1, i, GuildBankDepositArea, 1, Item->ID, Item->Icon,
-							guild_bank->Items.DepositArea[i].Quantity, guild_bank->Items.DepositArea[i].Permissions, 0, 0);
+							guild_bank->Items.DepositArea[i].Quantity, guild_bank->Items.DepositArea[i].Permissions, 1, 0);
 				else
 					gbius->Init(GuildBankItemUpdate, 1, i, GuildBankDepositArea, 1, Item->ID, Item->Icon,
 							guild_bank->Items.DepositArea[i].Quantity, guild_bank->Items.DepositArea[i].Permissions, 1, 0);
@@ -896,7 +900,7 @@ void GuildBankManager::SendGuildBank(Client *c)
 			{
 				if(guild_bank->Items.MainArea[i].Quantity == Item->StackSize)
 					gbius->Init(GuildBankItemUpdate, 1, i, GuildBankMainArea, 1, Item->ID, Item->Icon,
-							guild_bank->Items.MainArea[i].Quantity, guild_bank->Items.MainArea[i].Permissions, 0, Useable);
+							guild_bank->Items.MainArea[i].Quantity, guild_bank->Items.MainArea[i].Permissions, 1, Useable);
 				else
 					gbius->Init(GuildBankItemUpdate, 1, i, GuildBankMainArea, 1, Item->ID, Item->Icon,
 							guild_bank->Items.MainArea[i].Quantity, guild_bank->Items.MainArea[i].Permissions, 1, Useable);
@@ -1018,7 +1022,7 @@ bool GuildBankManager::AddItem(uint32 GuildID, uint8 Area, uint32 ItemID, int32 
 	else
 	{
 		if(QtyOrCharges == Item->StackSize)
-			gbius.Init(GuildBankItemUpdate, 1, Slot, Area, 1, ItemID, Item->Icon, Item->Stackable ? QtyOrCharges : 1, Permissions, 0, 0);
+			gbius.Init(GuildBankItemUpdate, 1, Slot, Area, 1, ItemID, Item->Icon, Item->Stackable ? QtyOrCharges : 1, Permissions, 1, 0);
 		else
 			gbius.Init(GuildBankItemUpdate, 1, Slot, Area, 1, ItemID, Item->Icon, Item->Stackable ? QtyOrCharges : 1, Permissions, 1, 0);
 	}
@@ -1085,7 +1089,7 @@ int GuildBankManager::Promote(uint32 guildID, int slotID)
 	{
 		if((*iter)->Items.MainArea[mainSlot].Quantity == Item->StackSize)
 			gbius.Init(GuildBankItemUpdate, 1, mainSlot, GuildBankMainArea, 1, Item->ID, Item->Icon,
-					(*iter)->Items.MainArea[mainSlot].Quantity, 0, 0, 0);
+					(*iter)->Items.MainArea[mainSlot].Quantity, 0, 1, 0);
 		else
 			gbius.Init(GuildBankItemUpdate, 1, mainSlot, GuildBankMainArea, 1, Item->ID, Item->Icon,
 					(*iter)->Items.MainArea[mainSlot].Quantity, 0, 1, 0);
@@ -1141,7 +1145,7 @@ void GuildBankManager::SetPermissions(uint32 guildID, uint16 slotID, uint32 perm
 	{
 		if((*iter)->Items.MainArea[slotID].Quantity == Item->StackSize)
 			gbius.Init(GuildBankItemUpdate, 1, slotID, GuildBankMainArea, 1, Item->ID, Item->Icon,
-					(*iter)->Items.MainArea[slotID].Quantity, (*iter)->Items.MainArea[slotID].Permissions, 0, 0);
+					(*iter)->Items.MainArea[slotID].Quantity, (*iter)->Items.MainArea[slotID].Permissions, 1, 0);
 		else
 			gbius.Init(GuildBankItemUpdate, 1, slotID, GuildBankMainArea, 1, Item->ID, Item->Icon,
 					(*iter)->Items.MainArea[slotID].Quantity, (*iter)->Items.MainArea[slotID].Permissions, 1, 0);
@@ -1384,7 +1388,7 @@ bool GuildBankManager::MergeStacks(uint32 GuildID, uint16 SlotID)
 			GuildBankItemUpdate_Struct gbius;
 
 			if(BankArea[i].Quantity == Item->StackSize)
-				gbius.Init(GuildBankItemUpdate, 1, i, GuildBankMainArea, 1, ItemID, Item->Icon, BankArea[i].Quantity, BankArea[i].Permissions, 0, 0);
+				gbius.Init(GuildBankItemUpdate, 1, i, GuildBankMainArea, 1, ItemID, Item->Icon, BankArea[i].Quantity, BankArea[i].Permissions, 1, 0);
 			else
 				gbius.Init(GuildBankItemUpdate, 1, i, GuildBankMainArea, 1, ItemID, Item->Icon, BankArea[i].Quantity, BankArea[i].Permissions, 1, 0);
 
@@ -1489,16 +1493,20 @@ bool GuildBankManager::AllowedToWithdraw(uint32 GuildID, uint16 Area, uint16 Slo
 
 void ZoneGuildManager::UpdateRankPermission(uint32 gid, uint32 charid, uint32 fid, uint32 rank, uint32 value)
 {
-	auto res = m_guilds.find(gid);
-	if (value) {
-		res->second->functions[fid].perm_value |= (1UL << (8 - rank));
-	}
-	else {
-		res->second->functions[fid].perm_value &= ~(1UL << (8 - rank));
-	}
-	auto query = fmt::format("UPDATE guild_permissions SET permission = {} WHERE perm_id = {} AND guild_id = {};", res->second->functions[fid].perm_value, fid, gid);
-	auto results = m_db->QueryDatabase(query);
+    auto guild = GetGuildByGuildID(gid);
+    if (!guild) {
+        return;
+    }
 
+    if (value) {
+        guild->functions[fid].perm_value |= (1UL << (8 - rank));
+    }
+    else {
+        guild->functions[fid].perm_value &= ~(1UL << (8 - rank));
+    }
+    auto query   = fmt::format("UPDATE guild_permissions SET permission = {} WHERE perm_id = {} AND guild_id = {};",
+                               guild->functions[fid].perm_value, fid, gid);
+    auto results = m_db->QueryDatabase(query);
 }
 
 void ZoneGuildManager::SendPermissionUpdate(uint32 guild_id, uint32 rank, uint32 function_id, uint32 value)
@@ -1534,21 +1542,20 @@ void ZoneGuildManager::SendRankName(uint32 guild_id, uint32 rank, std::string ra
 
 void ZoneGuildManager::SendAllRankNames(uint32 guild_id, uint32 char_id)
 {
-	auto guild = m_guilds.find(guild_id);
-	auto c = entity_list.GetClientByCharID(char_id);
-	if (c)
-	{
-		auto outapp = new EQApplicationPacket(OP_GuildUpdate, sizeof(GuildUpdateUCPStruct));
-		GuildUpdateUCPStruct* gucp = (GuildUpdateUCPStruct*)outapp->pBuffer;
-		for (int i = GUILD_LEADER; i <= GUILD_RECRUIT; i++)
-		{
-			gucp->payload.rank_name.rank = i;
-			strn0cpy(gucp->payload.rank_name.rank_name, guild->second->rank_names[i].c_str(), sizeof(gucp->payload.rank_name.rank_name));
-			gucp->action = GuildUpdateRanks;
-			c->QueuePacket(outapp);
-		}
-		safe_delete(outapp);
-	}
+    auto guild = GetGuildByGuildID(guild_id);
+    auto c     = entity_list.GetClientByCharID(char_id);
+    if (guild && c) {
+        auto                  outapp = new EQApplicationPacket(OP_GuildUpdate, sizeof(GuildUpdateUCPStruct));
+        GuildUpdateUCPStruct *gucp   = (GuildUpdateUCPStruct *)outapp->pBuffer;
+        for (int i = GUILD_LEADER; i <= GUILD_RECRUIT; i++) {
+            gucp->payload.rank_name.rank = i;
+            strn0cpy(gucp->payload.rank_name.rank_name, guild->rank_names[i].c_str(),
+                     sizeof(gucp->payload.rank_name.rank_name));
+            gucp->action = GuildUpdateRanks;
+            c->QueuePacket(outapp);
+        }
+        safe_delete(outapp);
+    }
 }
 
 BaseGuildManager::GuildInfo* ZoneGuildManager::GetGuildByGuildID(uint32 guild_id)

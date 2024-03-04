@@ -230,13 +230,23 @@ void WorldGuildManager::ProcessZonePacket(ServerPacket *pack) {
 	case ServerOP_GuildChannel:
 	case ServerOP_GuildURL:
 	case ServerOP_GuildMemberRemove:
-	case ServerOP_GuildMemberAdd:
 	case ServerOP_GuildSendGuildList:
 	case ServerOP_GuildMembersList:
 	{
 		zoneserver_list.SendPacketToBootedZones(pack);
 		break;
 	}
+    case ServerOP_GuildMemberAdd: 
+	{
+        auto in    = (ServerOP_GuildMessage_Struct *)pack->pBuffer;
+        auto guild = GetGuildByGuildID(in->guild_id);
+        if (!guild) {
+            BaseGuildManager::RefreshGuild(in->guild_id);
+        }
+
+        zoneserver_list.SendPacketToBootedZones(pack);
+        break;
+    }
 	default:
 		LogGuilds("Unknown packet {:#04x} received from zone??", pack->opcode);
 		break;
@@ -369,6 +379,10 @@ bool WorldGuildManager::LoadTributes()
 bool WorldGuildManager::RefreshGuild(uint32 guild_id)
 {
 	auto temp_guild = GetGuildByGuildID(guild_id);
+	if (!temp_guild) {
+		return false;
+	}
+
 	BaseGuildManager::GuildInfo temp_guild_detail;
 
 	if (temp_guild) {
@@ -389,6 +403,11 @@ bool WorldGuildManager::RefreshGuild(uint32 guild_id)
 	LogGuilds("Found guild id [{}].  Loading details.....", db_guild.id);
 	_CreateGuild(db_guild.id, db_guild.name, db_guild.leader, db_guild.minstatus, db_guild.motd, db_guild.motd_setter, db_guild.channel, db_guild.url, db_guild.favor);
 	auto guild = GetGuildByGuildID(guild_id);
+	if (!guild) {
+		LogError("Error refreshing guild id {}", guild_id);
+		return false;
+	}
+
 	auto where_filter = fmt::format("guild_id = '{}'", guild_id);
 	auto guild_ranks = GuildRanksRepository::GetWhere(*m_db, where_filter);
 	for (auto const& r : guild_ranks) {

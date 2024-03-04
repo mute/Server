@@ -566,6 +566,22 @@ public:
 	std::string GetRacePlural();
 	bool IsTemporaryPet();
 	uint32 GetMobTypeIdentifier();
+	uint32 GetHateListCount();
+	uint32 GetHateListBotCount();
+	uint32 GetHateListClientCount();
+	uint32 GetHateListNPCCount();
+	bool IsAnimation();
+	bool IsCharmed();
+	bool IsFamiliar();
+	bool IsTargetLockPet();
+	bool IsPetOwnerBot();
+	bool IsPetOwnerClient();
+	bool IsPetOwnerNPC();
+	bool IsDestructibleObject();
+	bool IsBoat();
+	bool IsControllableBoat();
+	int GetHeroicStrikethrough();
+	bool IsAlwaysAggro();
 };
 
 #endif
