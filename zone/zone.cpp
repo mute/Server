@@ -67,6 +67,7 @@
 #include "../common/serverinfo.h"
 #include "../common/repositories/merc_stance_entries_repository.h"
 #include "../common/repositories/alternate_currency_repository.h"
+#include "../common/repositories/graveyard_repository.h"
 
 #include <time.h>
 
@@ -106,6 +107,9 @@ bool Zone::Bootup(uint32 iZoneID, uint32 iInstanceID, bool is_static) {
 
 	numclients = 0;
 	zone = new Zone(iZoneID, iInstanceID, zonename);
+
+	parse->Init();
+	parse->ReloadQuests(true);
 
 	//init the zone, loads all the data, etc
 	if (!zone->Init(is_static)) {
@@ -157,7 +161,6 @@ bool Zone::Bootup(uint32 iZoneID, uint32 iInstanceID, bool is_static) {
 	LogInfo("Zone server [{}] listening on port [{}]", zonename, ZoneConfig::get()->ZonePort);
 	LogInfo("Zone bootup type [{}] short_name [{}] zone_id [{}] instance_id [{}]",
 		(is_static) ? "Static" : "Dynamic", zonename, iZoneID, iInstanceID);
-	parse->Init();
 	UpdateWindowTitle(nullptr);
 
 	// Dynamic zones need to Sync here.
@@ -1023,9 +1026,16 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
 
 	if (graveyard_id() > 0) {
 		LogDebug("Graveyard ID is [{}]", graveyard_id());
-		bool GraveYardLoaded = content_db.GetZoneGraveyard(graveyard_id(), &pgraveyard_zoneid, &m_graveyard.x, &m_graveyard.y, &m_graveyard.z, &m_graveyard.w);
+		const auto& e = GraveyardRepository::FindOne(content_db, graveyard_id());
 
-		if (GraveYardLoaded) {
+		if (e.id) {
+			pgraveyard_zoneid = e.zone_id;
+
+			m_graveyard.x = e.x;
+			m_graveyard.y = e.y;
+			m_graveyard.z = e.z;
+			m_graveyard.w = e.heading;
+
 			LogDebug("Loaded a graveyard for zone [{}]: graveyard zoneid is [{}] at [{}]", short_name, graveyard_zoneid(), to_string(m_graveyard).c_str());
 		}
 		else {
@@ -3318,6 +3328,17 @@ uint32 Zone::GetSecondsBeforeIdle() const
 void Zone::SetSecondsBeforeIdle(uint32 seconds_before_idle)
 {
 	Zone::m_seconds_before_idle = seconds_before_idle;
+}
+
+bool Zone::DoesAlternateCurrencyExist(uint32 currency_id)
+{
+	return std::any_of(
+		AlternateCurrencies.begin(),
+		AlternateCurrencies.end(),
+		[&](const auto& c) {
+			return c.id == currency_id;
+		}
+	);
 }
 
 #include "zone_loot.cpp"

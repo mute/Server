@@ -21,6 +21,9 @@
 #include "../common/strings.h"
 #include "../common/misc_functions.h"
 
+#include "../common/repositories/bot_data_repository.h"
+#include "../common/repositories/character_data_repository.h"
+
 #include "data_bucket.h"
 #include "quest_parser_collection.h"
 #include "string_ids.h"
@@ -260,7 +263,7 @@ Mob::Mob(
 	WIS                  = in_wis;
 	CHA                  = in_cha;
 	MR                   = CR = FR = DR = PR = Corrup = PhR = 0;
-	ExtraHaste           = 0;
+	extra_haste          = 0;
 	bEnraged             = false;
 	current_mana         = 0;
 	max_mana             = 0;
@@ -442,6 +445,7 @@ Mob::Mob(
 	weaponstance.aabonus_buff_spell_id    = 0;
 
 	pStandingPetOrder = SPO_Follow;
+	m_previous_pet_order = SPO_Follow;
 	pseudo_rooted     = false;
 
 	nobuff_invisible = 0;
@@ -505,8 +509,6 @@ Mob::Mob(
 
 	use_double_melee_round_dmg_bonus = false;
 	dw_same_delay                    = 0;
-
-	queue_wearchange_slot = -1;
 
 	m_manual_follow = false;
 
@@ -635,6 +637,16 @@ void Mob::CalcInvisibleLevel()
 	}
 
 	BreakCharmPetIfConditionsMet();
+}
+
+void Mob::SetPetOrder(eStandingPetOrder i) {
+	if (i == SPO_Sit || i == SPO_FeignDeath) {
+		if (pStandingPetOrder == SPO_Follow || pStandingPetOrder == SPO_Guard) {
+			m_previous_pet_order = pStandingPetOrder;
+		}
+	}
+
+	pStandingPetOrder = i;
 }
 
 void Mob::SetInvisible(uint8 state, bool set_on_bonus_calc) {
@@ -940,19 +952,16 @@ int Mob::_GetFearSpeed() const {
 	return speed_mod;
 }
 
-int64 Mob::CalcMaxMana() {
-	switch (GetCasterClass()) {
-		case 'I':
-			max_mana = (((GetINT()/2)+1) * GetLevel()) + spellbonuses.Mana + itembonuses.Mana;
-			break;
-		case 'W':
-			max_mana = (((GetWIS()/2)+1) * GetLevel()) + spellbonuses.Mana + itembonuses.Mana;
-			break;
-		case 'N':
-		default:
-			max_mana = 0;
-			break;
+int64 Mob::CalcMaxMana()
+{
+	if (IsIntelligenceCasterClass()) {
+		max_mana = (((GetINT() / 2) + 1) * GetLevel()) + spellbonuses.Mana + itembonuses.Mana;
+	} else if (IsWisdomCasterClass()) {
+		max_mana = (((GetWIS() / 2) + 1) * GetLevel()) + spellbonuses.Mana + itembonuses.Mana;
+	} else {
+		max_mana = 0;
 	}
+
 	if (max_mana < 0) {
 		max_mana = 0;
 	}
@@ -961,8 +970,9 @@ int64 Mob::CalcMaxMana() {
 }
 
 int64 Mob::CalcMaxHP() {
-	max_hp = (base_hp + itembonuses.HP + spellbonuses.HP);
-	max_hp += max_hp * ((aabonuses.MaxHPChange + spellbonuses.MaxHPChange + itembonuses.MaxHPChange) / 10000.0f);
+	max_hp = (base_hp + itembonuses.HP);
+	max_hp += max_hp * ((aabonuses.PercentMaxHPChange + spellbonuses.PercentMaxHPChange + itembonuses.PercentMaxHPChange) / 10000.0f);
+	max_hp += spellbonuses.FlatMaxHPChange + itembonuses.FlatMaxHPChange + aabonuses.FlatMaxHPChange;
 
 	return max_hp;
 }
@@ -970,101 +980,165 @@ int64 Mob::CalcMaxHP() {
 int64 Mob::GetItemHPBonuses() {
 	int64 item_hp = 0;
 	item_hp = itembonuses.HP;
-	item_hp += item_hp * itembonuses.MaxHPChange / 10000;
+	item_hp += item_hp * ((itembonuses.PercentMaxHPChange + spellbonuses.FlatMaxHPChange + aabonuses.FlatMaxHPChange) / 10000.0f);
 	return item_hp;
 }
 
 int64 Mob::GetSpellHPBonuses() {
 	int64 spell_hp = 0;
-	spell_hp = spellbonuses.HP;
-	spell_hp += spell_hp * spellbonuses.MaxHPChange / 10000;
+	spell_hp += spellbonuses.FlatMaxHPChange;
 	return spell_hp;
 }
 
-char Mob::GetCasterClass() const {
-	switch(class_)
-	{
-	case Class::Cleric:
-	case Class::Paladin:
-	case Class::Ranger:
-	case Class::Druid:
-	case Class::Shaman:
-	case Class::Beastlord:
-	case Class::ClericGM:
-	case Class::PaladinGM:
-	case Class::RangerGM:
-	case Class::DruidGM:
-	case Class::ShamanGM:
-	case Class::BeastlordGM:
-		return 'W';
-		break;
-
-	case Class::ShadowKnight:
-	case Class::Bard:
-	case Class::Necromancer:
-	case Class::Wizard:
-	case Class::Magician:
-	case Class::Enchanter:
-	case Class::ShadowKnightGM:
-	case Class::BardGM:
-	case Class::NecromancerGM:
-	case Class::WizardGM:
-	case Class::MagicianGM:
-	case Class::EnchanterGM:
-		return 'I';
-		break;
-
-	default:
-		return 'N';
-		break;
+bool Mob::IsIntelligenceCasterClass() const
+{
+	switch (GetClass()) {
+		case Class::ShadowKnight:
+		case Class::Bard:
+		case Class::Necromancer:
+		case Class::Wizard:
+		case Class::Magician:
+		case Class::Enchanter:
+		case Class::ShadowKnightGM:
+		case Class::BardGM:
+		case Class::NecromancerGM:
+		case Class::WizardGM:
+		case Class::MagicianGM:
+		case Class::EnchanterGM:
+			return true;
 	}
+
+	return false;
 }
 
-uint8 Mob::GetArchetype() const {
-	switch(class_)
-	{
-	case Class::Paladin:
-	case Class::Ranger:
-	case Class::ShadowKnight:
-	case Class::Bard:
-	case Class::Beastlord:
-	case Class::PaladinGM:
-	case Class::RangerGM:
-	case Class::ShadowKnightGM:
-	case Class::BardGM:
-	case Class::BeastlordGM:
-		return ARCHETYPE_HYBRID;
-		break;
-	case Class::Cleric:
-	case Class::Druid:
-	case Class::Shaman:
-	case Class::Necromancer:
-	case Class::Wizard:
-	case Class::Magician:
-	case Class::Enchanter:
-	case Class::ClericGM:
-	case Class::DruidGM:
-	case Class::ShamanGM:
-	case Class::NecromancerGM:
-	case Class::WizardGM:
-	case Class::MagicianGM:
-	case Class::EnchanterGM:
-		return ARCHETYPE_CASTER;
-		break;
-	case Class::Warrior:
-	case Class::Monk:
-	case Class::Rogue:
-	case Class::Berserker:
-	case Class::WarriorGM:
-	case Class::MonkGM:
-	case Class::RogueGM:
-	case Class::BerserkerGM:
-		return ARCHETYPE_MELEE;
-		break;
-	default:
-		return ARCHETYPE_HYBRID;
-		break;
+bool Mob::IsPureMeleeClass() const
+{
+	switch (GetClass()) {
+		case Class::Warrior:
+		case Class::Monk:
+		case Class::Rogue:
+		case Class::Berserker:
+		case Class::WarriorGM:
+		case Class::MonkGM:
+		case Class::RogueGM:
+		case Class::BerserkerGM:
+			return true;
+		default:
+			break;
 	}
+
+	return false;
+}
+
+bool Mob::IsWarriorClass() const
+{
+	switch (GetClass()) {
+		case Class::Warrior:
+		case Class::Paladin:
+		case Class::Ranger:
+		case Class::ShadowKnight:
+		case Class::Monk:
+		case Class::Bard:
+		case Class::Rogue:
+		case Class::Beastlord:
+		case Class::Berserker:
+		case Class::WarriorGM:
+		case Class::PaladinGM:
+		case Class::RangerGM:
+		case Class::ShadowKnightGM:
+		case Class::MonkGM:
+		case Class::BardGM:
+		case Class::RogueGM:
+		case Class::BeastlordGM:
+		case Class::BerserkerGM:
+			return true;
+		default:
+			break;
+	}
+
+	return false;
+}
+
+bool Mob::IsWisdomCasterClass() const
+{
+	switch (GetClass()) {
+		case Class::Cleric:
+		case Class::Paladin:
+		case Class::Ranger:
+		case Class::Druid:
+		case Class::Shaman:
+		case Class::Beastlord:
+		case Class::ClericGM:
+		case Class::PaladinGM:
+		case Class::RangerGM:
+		case Class::DruidGM:
+		case Class::ShamanGM:
+		case Class::BeastlordGM:
+			return true;
+	}
+
+	return false;
+}
+
+uint8 Mob::GetArchetype() const
+{
+	switch (GetClass()) {
+		case Class::Paladin:
+		case Class::Ranger:
+		case Class::ShadowKnight:
+		case Class::Bard:
+		case Class::Beastlord:
+		case Class::PaladinGM:
+		case Class::RangerGM:
+		case Class::ShadowKnightGM:
+		case Class::BardGM:
+		case Class::BeastlordGM:
+			return Archetype::Hybrid;
+		case Class::Cleric:
+		case Class::Druid:
+		case Class::Shaman:
+		case Class::Necromancer:
+		case Class::Wizard:
+		case Class::Magician:
+		case Class::Enchanter:
+		case Class::ClericGM:
+		case Class::DruidGM:
+		case Class::ShamanGM:
+		case Class::NecromancerGM:
+		case Class::WizardGM:
+		case Class::MagicianGM:
+		case Class::EnchanterGM:
+			return Archetype::Caster;
+		case Class::Warrior:
+		case Class::Monk:
+		case Class::Rogue:
+		case Class::Berserker:
+		case Class::WarriorGM:
+		case Class::MonkGM:
+		case Class::RogueGM:
+		case Class::BerserkerGM:
+			return Archetype::Melee;
+		default:
+			break;
+	}
+
+	return Archetype::Hybrid;
+}
+
+const std::string Mob::GetArchetypeName()
+{
+	switch (GetArchetype()) {
+		case Archetype::Hybrid:
+			return "Hybrid";
+		case Archetype::Caster:
+			return "Caster";
+		case Archetype::Melee:
+			return "Melee";
+		default:
+			break;
+	}
+
+	return "Hybrid";
 }
 
 void Mob::SetSpawnLastNameByClass(NewSpawn_Struct* ns)
@@ -1583,6 +1657,22 @@ void Mob::SendHPUpdate(bool force_update_all)
 			_appearance = eaLooting;
 		}
 	}
+}
+
+void Mob::SendRename(Mob *sender, const char* old_name, const char* new_name)
+{
+	auto out2 = new EQApplicationPacket(OP_MobRename, sizeof(MobRename_Struct));
+	auto data = (MobRename_Struct *)out2->pBuffer;
+	out2->priority = 6;
+
+	strn0cpy(data->old_name, old_name, sizeof(data->old_name));
+	strn0cpy(data->old_name_again, old_name, sizeof(data->old_name_again));
+	strn0cpy(data->new_name, new_name, sizeof(data->new_name));
+	data->unknown192 = 0;
+	data->unknown196 = 1;
+
+	entity_list.QueueClients(sender, out2);
+	safe_delete(out2);
 }
 
 void Mob::StopMoving()
@@ -2321,7 +2411,7 @@ void Mob::SendStatsWindow(Client* c, bool use_window)
 			DialogueWindow::TableRow(
 				DialogueWindow::TableCell(Strings::Commify(itembonuses.haste)) +
 				DialogueWindow::TableCell(Strings::Commify(spellbonuses.haste + spellbonuses.hastetype2)) +
-				DialogueWindow::TableCell(Strings::Commify(spellbonuses.hastetype3 + ExtraHaste)) +
+				DialogueWindow::TableCell(Strings::Commify(spellbonuses.hastetype3 + extra_haste)) +
 				DialogueWindow::TableCell(
 					fmt::format(
 						"{} ({})",
@@ -2601,7 +2691,7 @@ void Mob::SendStatsWindow(Client* c, bool use_window)
 				Strings::Commify(RuleI(Character, HasteCap)),
 				Strings::Commify(itembonuses.haste),
 				Strings::Commify(spellbonuses.haste + spellbonuses.hastetype2),
-				Strings::Commify(spellbonuses.hastetype3 + ExtraHaste)
+				Strings::Commify(spellbonuses.hastetype3 + extra_haste)
 			).c_str()
 		);
 	}
@@ -4312,15 +4402,7 @@ void Mob::TempName(const char *newname)
 	entity_list.MakeNameUnique(temp_name);
 
 	// Send the new name to all clients
-	auto outapp = new EQApplicationPacket(OP_MobRename, sizeof(MobRename_Struct));
-	MobRename_Struct* mr = (MobRename_Struct*) outapp->pBuffer;
-	strn0cpy(mr->old_name, old_name, 64);
-	strn0cpy(mr->old_name_again, old_name, 64);
-	strn0cpy(mr->new_name, temp_name, 64);
-	mr->unknown192 = 0;
-	mr->unknown196 = 1;
-	entity_list.QueueClients(this, outapp);
-	safe_delete(outapp);
+	SendRename(this, old_name, temp_name);
 
 	SetName(temp_name);
 }
@@ -4584,39 +4666,6 @@ bool Mob::CanThisClassTripleAttack() const
 			return CastToClient()->HasSkill(EQ::skills::SkillTripleAttack);
 		}
 	}
-}
-
-bool Mob::IsWarriorClass(void) const
-{
-	switch(GetClass())
-	{
-	case Class::Warrior:
-	case Class::WarriorGM:
-	case Class::Rogue:
-	case Class::RogueGM:
-	case Class::Monk:
-	case Class::MonkGM:
-	case Class::Paladin:
-	case Class::PaladinGM:
-	case Class::ShadowKnight:
-	case Class::ShadowKnightGM:
-	case Class::Ranger:
-	case Class::RangerGM:
-	case Class::Beastlord:
-	case Class::BeastlordGM:
-	case Class::Berserker:
-	case Class::BerserkerGM:
-	case Class::Bard:
-	case Class::BardGM:
-		{
-			return true;
-		}
-	default:
-		{
-			return false;
-		}
-	}
-
 }
 
 bool Mob::CanThisClassParry(void) const
@@ -5414,7 +5463,7 @@ int Mob::GetHaste()
 	} else { // 1-50
 		h += spellbonuses.hastetype3 > 10 ? 10 : spellbonuses.hastetype3;
 	}
-	h += ExtraHaste;	//GM granted haste.
+	h += extra_haste;	//GM granted haste.
 
 	return 100 + h;
 }
@@ -8501,6 +8550,33 @@ void Mob::HandleDoorOpen()
 			}
 
 			d->ForceOpen(this);
+		}
+	}
+}
+
+void Mob::SetExtraHaste(int haste, bool need_to_save)
+{
+	extra_haste = haste;
+
+	if (need_to_save) {
+		if (IsBot()) {
+			auto e = BotDataRepository::FindOne(database, CastToBot()->GetBotID());
+			if (!e.bot_id) {
+				return;
+			}
+
+			e.extra_haste = haste;
+
+			BotDataRepository::UpdateOne(database, e);
+		} else if (IsClient()) {
+			auto e = CharacterDataRepository::FindOne(database, CastToClient()->CharacterID());
+			if (!e.id) {
+				return;
+			}
+
+			e.extra_haste = haste;
+
+			CharacterDataRepository::UpdateOne(database, e);
 		}
 	}
 }

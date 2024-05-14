@@ -138,7 +138,7 @@ void ClientListEntry::SetOnline(CLE_Status iOnline)
 		"Online status [{}] ({}) status [{}] ({})",
 		AccountName(),
 		AccountID(),
-		CLEStatusString[CLE_Status::Online],
+		CLEStatusString[iOnline],
 		static_cast<int>(iOnline)
 	);
 
@@ -344,7 +344,7 @@ bool ClientListEntry::CheckAuth(uint32 loginserver_account_id, const char *key_p
 
 			paccountid = database.CreateAccount(
 				loginserver_account_name,
-				0,
+				std::string(),
 				default_account_status,
 				source_loginserver,
 				LSID()
