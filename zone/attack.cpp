@@ -6706,24 +6706,27 @@ void Client::DoAttackRounds(Mob *target, int hand, bool IsFromSpell)
 			}
 
 			// you can only triple from the main hand
-			if (hand == EQ::invslot::slotPrimary && CanThisClassTripleAttack()) {
-				if (!RuleB(Combat, ClassicTripleAttack)) {
-					CheckIncreaseSkill(EQ::skills::SkillTripleAttack, target, -10);
+			if (hand == EQ::invslot::slotPrimary) {
+				if (CanThisClassTripleAttack()) {
+					if (!RuleB(Combat, ClassicTripleAttack)) {
+						CheckIncreaseSkill(EQ::skills::SkillTripleAttack, target, -10);
+					}
+
+					if (CheckTripleAttack()) {
+						Attack(target, hand, false, false, IsFromSpell);
+					}
 				}
 
-				if (CheckTripleAttack()) {
+				int flurry_chance = aabonuses.FlurryChance + spellbonuses.FlurryChance +
+							itembonuses.FlurryChance;
+
+				if (flurry_chance && zone->random.Roll(flurry_chance)) {
 					Attack(target, hand, false, false, IsFromSpell);
-					int flurry_chance = aabonuses.FlurryChance + spellbonuses.FlurryChance +
-							    itembonuses.FlurryChance;
 
-					if (flurry_chance && zone->random.Roll(flurry_chance)) {
+					if (zone->random.Roll(flurry_chance)) {
 						Attack(target, hand, false, false, IsFromSpell);
-
-						if (zone->random.Roll(flurry_chance)) {
-							Attack(target, hand, false, false, IsFromSpell);
-						}
-						MessageString(Chat::NPCFlurry, YOU_FLURRY);
 					}
+					MessageString(Chat::NPCFlurry, YOU_FLURRY);
 				}
 			}
 		}
