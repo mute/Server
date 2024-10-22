@@ -1242,7 +1242,7 @@ public:
 	void RemoveDuplicateLore(bool client_update = true);
 	void MoveSlotNotAllowed(bool client_update = true);
 	virtual bool RangedAttack(Mob* other, bool CanDoubleAttack = false);
-	virtual void ThrowingAttack(Mob* other, bool CanDoubleAttack = false);
+	virtual bool ThrowingAttack(Mob* other, bool CanDoubleAttack = false);
 	void DoClassAttacks(Mob *ca_target, uint16 skill = -1, bool IsRiposte=false);
 
 	void ClearZoneFlag(uint32 zone_id);
