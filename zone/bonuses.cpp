@@ -1385,6 +1385,10 @@ void Mob::ApplyAABonuses(const AA::Rank &rank, StatBonuses *newbon)
 				newbon->CriticalSpellChance += base_value;
 			}
 
+			if (limit_value <= 100) {
+				break;
+			}
+
 			int new_limit = newbon->SpellCritDmgIncNoStack + limit_value;
 
 			if (new_limit > RuleI(Custom, AdditiveSpellCritDmgSoftCap)) {
