@@ -7026,12 +7026,11 @@ void Client::SetAttackTimer()
 			// rather than the cap ...
 			speed = std::max(speed - GetQuiverHaste(speed), RuleI(Combat, QuiverHasteCap));
 		}
-		else {
-			if (RuleB(Spells, Jun182014HundredHandsRevamp))
-				speed = static_cast<int>(speed + ((hhe / 1000.0f) * speed));
-			else
-				speed = static_cast<int>(speed + ((hhe / 100.0f) * delay));
-		}
+
+		if (RuleB(Spells, Jun182014HundredHandsRevamp))
+			speed = static_cast<int>(speed + ((hhe / 1000.0f) * speed));
+		else
+			speed = static_cast<int>(speed + ((hhe / 100.0f) * delay));
 		TimerToUse->SetAtTrigger(std::max(RuleI(Combat, MinHastedDelay), speed), true, true);
 
 		if (i == EQ::invslot::slotPrimary) {
