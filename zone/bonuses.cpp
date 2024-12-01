@@ -1475,18 +1475,13 @@ void Mob::ApplyAABonuses(const AA::Rank &rank, StatBonuses *newbon)
 		}
 
 		case SE_GiveDoubleRiposte: {
-			// 0=Regular Riposte 1=Skill Attack Riposte 2=Skill
 			if (limit_value == 0) {
-				/*if (newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] < base_value)
-					newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] = base_value;*/
+				// Regular double riposte bonus uses the 0 limit / index as its "skill ID"
 				newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] += base_value;
+			} else if (limit_value > 0) {
+				// Add or update the skill-specific chance
+				newbon->GiveDoubleRiposte[limit_value] += base_value; // limit_value is the Skill ID, base is the chance
 			}
-			// Only for special attacks.
-			else if (limit_value > 0/* && (newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL_ATK_CHANCE] < base_value)*/) {
-				newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL_ATK_CHANCE] += base_value;
-				newbon->GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL]            = limit_value;
-			}
-
 			break;
 		}
 

@@ -4513,7 +4513,7 @@ bool Bot::TryFinishingBlow(Mob *defender, int64 &damage)
 }
 
 void Bot::DoRiposte(Mob* defender) {
-	LogCombatDetail("Preforming a riposte");
+	LogCombatDetail("Performing a riposte");
 	if (!defender)
 		return;
 
@@ -4524,12 +4524,22 @@ void Bot::DoRiposte(Mob* defender) {
 		defender->Attack(this, EQ::invslot::slotPrimary, true);
 	}
 
-	DoubleRipChance = defender->GetAABonuses().GiveDoubleRiposte[1];
-	if (DoubleRipChance && (DoubleRipChance >= zone->random.Int(0, 100))) {
-		if (defender->HasClass(Class::Monk))
-			defender->MonkSpecialAttack(this, defender->GetAABonuses().GiveDoubleRiposte[2]);
-		else if (defender->IsBot())
-			defender->CastToClient()->DoClassAttacks(this,defender->GetAABonuses().GiveDoubleRiposte[2], true);
+	// Double Riposte effect, allows for a chance to do RIPOSTE with a skill specific special attack (ie Return Kick).
+	for (int skill_id = 0; skill_id < EQ::skills::HIGHEST_SKILL; ++skill_id) {
+		if (defender->aabonuses.GiveDoubleRiposte[skill_id] > 0 && zone->random.Roll(defender->aabonuses.GiveDoubleRiposte[skill_id])) {
+			LogCombat("Performing a return special attack with skill [{}] ([{}] percent chance)", skill_id, chance);
+
+			if ((HasClass(Class::Monk)) &&
+				(ca_atk->m_skill == EQ::skills::SkillFlyingKick ||
+				ca_atk->m_skill == EQ::skills::SkillDragonPunch ||
+				ca_atk->m_skill == EQ::skills::SkillEagleStrike ||
+				ca_atk->m_skill == EQ::skills::SkillTigerClaw ||
+				ca_atk->m_skill == EQ::skills::SkillRoundKick)) {
+				defender->MonkSpecialAttack(this, skill_id);
+			}
+			else if (defender->IsBot())
+				defender->CastToClient()->DoClassAttacks(this, skill_id, true);
+		}
 	}
 }
 

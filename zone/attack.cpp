@@ -5993,29 +5993,34 @@ void Mob::DoRiposte(Mob *defender)
 			return;
 	}
 
-	DoubleRipChance = defender->aabonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] + defender->spellbonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] +
+	DoubleRipChance = defender->aabonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] +
+					  defender->spellbonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE] +
 					  defender->itembonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_CHANCE];
 
 	// Live AA - Double Riposte
 	if (DoubleRipChance && zone->random.Roll(DoubleRipChance)) {
-		LogCombat("Preforming a double riposted from SE_GiveDoubleRiposte base1 == 0 ([{}] percent chance)", DoubleRipChance);
+		LogCombat("Performing a double riposte ([{}] percent chance)", DoubleRipChance);
 		defender->Attack(this, EQ::invslot::slotPrimary, true);
 		if (HasDied())
 			return;
 	}
 
 	// Double Riposte effect, allows for a chance to do RIPOSTE with a skill specific special attack (ie Return Kick).
-	// Coded narrowly: Limit to one per client. Limit AA only. [1 = Skill Attack Chance, 2 = Skill]
+	for (int skill_id = 0; skill_id < EQ::skills::HIGHEST_SKILL; ++skill_id) {
+		if (defender->aabonuses.GiveDoubleRiposte[skill_id] > 0 && zone->random.Roll(defender->aabonuses.GiveDoubleRiposte[skill_id])) {
+			LogCombat("Performing a return special attack with skill [{}] ([{}] percent chance)", skill_id, chance);
 
-	DoubleRipChance = defender->aabonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL_ATK_CHANCE];
-
-	if (DoubleRipChance && zone->random.Roll(DoubleRipChance)) {
-		LogCombat("Preforming a return SPECIAL ATTACK ([{}] percent chance)", DoubleRipChance);
-
-	if (defender->HasClass(Class::Monk))
-		defender->MonkSpecialAttack(this, defender->aabonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL]);
-	else if (defender->IsClient()) // so yeah, even if you don't have the skill you can still do the attack :P (and we don't crash anymore)
-		defender->CastToClient()->DoClassAttacks(this, defender->aabonuses.GiveDoubleRiposte[SBIndex::DOUBLE_RIPOSTE_SKILL], true);
+			if ((HasClass(Class::Monk)) &&
+				(ca_atk->m_skill == EQ::skills::SkillFlyingKick ||
+				ca_atk->m_skill == EQ::skills::SkillDragonPunch ||
+				ca_atk->m_skill == EQ::skills::SkillEagleStrike ||
+				ca_atk->m_skill == EQ::skills::SkillTigerClaw ||
+				ca_atk->m_skill == EQ::skills::SkillRoundKick)) {
+				defender->MonkSpecialAttack(this, skill_id);
+			}
+			else if (defender->IsClient())
+				defender->CastToClient()->DoClassAttacks(this, skill_id, true);
+		}
 	}
 }
 
