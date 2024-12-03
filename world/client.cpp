@@ -2357,13 +2357,8 @@ void Client::SetRacialLanguages( PlayerProfile_Struct *pp )
 
 void Client::SetClassLanguages(PlayerProfile_Struct *pp)
 {
-	// we only need to handle one class, but custom server might want to do more
-	switch (pp->class_) {
-		case Class::Rogue:
-			pp->languages[Language::ThievesCant] = Language::MaxValue;
-			break;
-		default:
-			break;
+	if (IsPlayerClass(Class::Rogue)) {
+		pp->languages[Language::ThievesCant] = Language::MaxValue;
 	}
 }
 
