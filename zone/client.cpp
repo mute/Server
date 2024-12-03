@@ -4986,7 +4986,8 @@ void Client::Sacrifice(Mob *caster)
 	if (GetLevel() >= RuleI(Spells, SacrificeMinLevel) && GetLevel() <= RuleI(Spells, SacrificeMaxLevel)) {
 		int exploss = (int)(GetLevel() * (GetLevel() / 18.0) * 12000);
 		if (exploss < GetEXP()) {
-			SetEXP(ExpSource::Sacrifice, GetEXP() - exploss, GetAAXP(), false);
+			int exp_for_level = GetEXPForLevel(GetLevel())
+			SetEXP(ExpSource::Sacrifice, std::max(exp_for_level, GetEXP() - exploss), GetAAXP(), false);
 			SendLogoutPackets();
 
 			// make our become corpse packet, and queue to ourself before OP_Death.
