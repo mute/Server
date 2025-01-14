@@ -1078,6 +1078,10 @@ RULE_REAL(Custom, 	PowerSourceItemUpgradeRateScale, 		1.0, "Scale XP rate of ite
 RULE_REAL(Custom, 	PowerSourceItemTier1RateFloor,			1.0, "Smallest percentage item XP that a white can can award for a tier 1 item")
 RULE_REAL(Custom, 	PowerSourceItemTier2RateFloor,			0.1, "Smallest percentage item XP that a white can can award for a tier 2 item")
 
+// Diablo Loot
+RULE_BOOL(Custom,   DiabloLoot,								false, "Generate loot with augments automatically")
+RULE_REAL(Custom,	DiabloLootRate,							25.0,  "Percentage of eligible drops that will have an upgrade")
+
 // General QoL and Customizations
 RULE_BOOL(Custom, 	UseDynamicItemDiscoveryTags, 			true, "Enable appfending Discovered By: items using the charmfile method")
 RULE_BOOL(Custom, 	TauntTogglesPetTanking, 				true, "Enable to let pets hold aggro while taunt is on")
