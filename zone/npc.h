@@ -340,6 +340,8 @@ public:
 
 	uint32 DoUpgradeLoot(uint32 itemID);
 
+	uint32 MakeItemEnchantment(const EQ::ItemData* base_item, int rate) const;
+
 	void AddLootDrop(
 		const EQ::ItemData *item2,
 		LootdropEntriesRepository::LootdropEntries loot_drop,

@@ -10,6 +10,7 @@
 #include "global_loot_manager.h"
 #include "../common/repositories/criteria/content_filter_criteria.h"
 #include "../common/repositories/global_loot_repository.h"
+#include "../common/repositories/enchantment_definition_repository.h"
 #include "quest_parser_collection.h"
 
 #ifdef _WINDOWS
@@ -268,7 +269,6 @@ uint32 NPC::DoUpgradeLoot(uint32 itemID) {
 		uint32 roll = zone->random.Real(0.0, 100.0);
 		uint32 newID = itemID % 1000000;
 
-		// TODO: Affix system will need to update this
 		uint32 currentTier = itemID / 1000000;
 
 		if (roll <= RuleR(Custom, Tier2ItemDropRate) && currentTier < 2) {
@@ -285,6 +285,14 @@ uint32 NPC::DoUpgradeLoot(uint32 itemID) {
 	return itemID;
 }
 
+uint32 NPC::MakeItemEnchantment(const EQ::ItemData* base_item, int rate) const {
+	if (!zone->random.Roll(rate)) {
+		return 0;
+	}
+
+	return EnchantmentDefinitionRepository::GetEnchantmentItemID(EnchantmentDefinitionRepository::GetRandomForItem(database, base_item));
+}
+
 void NPC::AddLootDrop(
 	const EQ::ItemData *item2,
 	LootdropEntriesRepository::LootdropEntries loot_drop,
@@ -299,6 +307,47 @@ void NPC::AddLootDrop(
 {
 	if (RuleB(Custom, DoItemUpgrades) && item2->ID <= 1000000 && !IsPet()) {
 		item2 = database.GetItem(DoUpgradeLoot(item2->ID));
+	}
+
+	if (RuleB(Custom, Enchantments) && item2 && !IsPet()) {
+		int mod_count = 1;
+		for (int roll = 0; roll < 5; ++roll) {
+			if (!augment_five && RuleB(Custom, EnchantmentSlot5)) {
+				augment_five = MakeItemEnchantment(item2, RuleI(Custom, EnchantmentRate) / mod_count);
+				if (augment_five) {
+					++mod_count;
+					continue;
+				}
+			}
+			if (!augment_four && RuleB(Custom, EnchantmentSlot4)) {
+				augment_four = MakeItemEnchantment(item2, RuleI(Custom, EnchantmentRate) / mod_count);
+				if (augment_four) {
+					++mod_count;
+					continue;
+				}
+			}
+			if (!augment_three && RuleB(Custom, EnchantmentSlot3)) {
+				augment_three = MakeItemEnchantment(item2, RuleI(Custom, EnchantmentRate) / mod_count);
+				if (augment_three) {
+					++mod_count;
+					continue;
+				}
+			}
+			if (!augment_two && RuleB(Custom, EnchantmentSlot2)) {
+				augment_two = MakeItemEnchantment(item2, RuleI(Custom, EnchantmentRate) / mod_count);
+				if (augment_two) {
+					++mod_count;
+					continue;
+				}
+			}
+			if (!augment_one && RuleB(Custom, EnchantmentSlot1)) {
+				augment_one = MakeItemEnchantment(item2, RuleI(Custom, EnchantmentRate) / mod_count);
+				if (augment_one) {
+					++mod_count;
+					continue;
+				}
+			}
+		}
 	}
 
 	AddLootDropFixed(item2, loot_drop, wear_change, augment_one, augment_two, augment_three, augment_four, augment_five, augment_six);

@@ -1078,10 +1078,6 @@ RULE_REAL(Custom, 	PowerSourceItemUpgradeRateScale, 		1.0, "Scale XP rate of ite
 RULE_REAL(Custom, 	PowerSourceItemTier1RateFloor,			1.0, "Smallest percentage item XP that a white can can award for a tier 1 item")
 RULE_REAL(Custom, 	PowerSourceItemTier2RateFloor,			0.1, "Smallest percentage item XP that a white can can award for a tier 2 item")
 
-// Diablo Loot
-RULE_BOOL(Custom,   DiabloLoot,								false, "Generate loot with augments automatically")
-RULE_REAL(Custom,	DiabloLootRate,							25.0,  "Percentage of eligible drops that will have an upgrade")
-
 // General QoL and Customizations
 RULE_BOOL(Custom, 	UseDynamicItemDiscoveryTags, 			true, "Enable appfending Discovered By: items using the charmfile method")
 RULE_BOOL(Custom, 	TauntTogglesPetTanking, 				true, "Enable to let pets hold aggro while taunt is on")
@@ -1119,6 +1115,16 @@ RULE_INT(Custom,	UnattuneCostMultiplier,					25, "Multiply this number by item_v
 RULE_INT(Custom,	CombineCostMultiplier,					25, "Multiply this number by item_value to get cost in platinum to combine")
 
 RULE_INT(Custom, ServerAuthKey, 0, "Value used to verify patch serial number")
+
+RULE_BOOL(Custom,   Enchantments,							false, "Generate loot with augments automatically")
+RULE_INT(Custom,	EnchantmentRate,						25,    "Percentage of eligible drops that will have an upgrade")
+RULE_BOOL(Custom, 	EnchantmentSlot1,						false, "Does Enchantment system use aug Slot 1")
+RULE_BOOL(Custom, 	EnchantmentSlot2,						false, "Does Enchantment system use aug Slot 2")
+RULE_BOOL(Custom, 	EnchantmentSlot3,						false, "Does Enchantment system use aug Slot 3")
+RULE_BOOL(Custom, 	EnchantmentSlot4,						false, "Does Enchantment system use aug Slot 4")
+RULE_BOOL(Custom, 	EnchantmentSlot5,						false, "Does Enchantment system use aug Slot 5")
+RULE_BOOL(Custom,   EnchantmentPowerSource,					false, "Does Power Source allow for re-rolling modifiers")
+RULE_INT(Custom,    EnchantmentAugTemplate,					41091, "Augment to use as template for generating Enchantment augs")
 
 // Seasonal
 RULE_INT(Custom,  	EnableSeasonalCharacters, 				0, "Set to Seasonal ID to track for current Seasonal characters, 0 to disable.")

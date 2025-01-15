@@ -54,6 +54,7 @@
 #include "repositories/skill_caps_repository.h"
 #include "repositories/inventory_repository.h"
 #include "repositories/books_repository.h"
+#include "repositories/enchantment_definition_repository.h"
 
 namespace ItemField
 {
@@ -1543,11 +1544,174 @@ void SharedDatabase::LoadItems(void *data, uint32 size, int32 items, uint32 max_
 			}
 		}
 
+		if (RuleB(Custom, Enchantments) && item.ItemType != EQ::item::ItemTypeAugmentation && item.Classes && item.Races && item.Slots) {
+			// Array to temporarily hold augment data
+			struct AugSlot {
+				int type;
+				int visible;
+			} tempAugs[6] = {};
+
+			int packIndex = 0; // Index to pack valid augments into slots 1-5
+			bool type20Or21Moved = false; // Flag to ensure type 20 or 21 is moved to slot 6
+
+			// Iterate through augment slots
+			for (int i = 0; i < 6; ++i) {
+				if (item.AugSlotType[i] == 20 || item.AugSlotType[i] == 21) {
+					// Move type 20 or 21 augment to slot 6 if not already moved
+					if (!type20Or21Moved) {
+						tempAugs[5].type = item.AugSlotType[i];
+						tempAugs[5].visible = item.AugSlotVisible[i];
+						type20Or21Moved = true;
+					}
+				} else if (item.AugSlotType[i] != 0) {
+					// Pack other augment slots into 1-5
+					if (packIndex < 5) {
+						tempAugs[packIndex].type = item.AugSlotType[i];
+						tempAugs[packIndex].visible = item.AugSlotVisible[i];
+						++packIndex;
+					}
+				}
+			}
+
+			// Fill remaining slots in 1-5 with empty data
+			for (int i = packIndex; i < 5; ++i) {
+				tempAugs[i].type = 0;
+				tempAugs[i].visible = 0;
+			}
+
+			// Assign back the organized augment slots to the item
+			for (int i = 0; i < 6; ++i) {
+				item.AugSlotType[i] = tempAugs[i].type;
+				item.AugSlotVisible[i] = tempAugs[i].visible;
+			}
+
+			if (RuleB(Custom, EnchantmentSlot5) && (!item.AugSlotVisible[4] || !item.AugSlotType[4])) {
+				item.AugSlotType[4] = 31;
+				item.AugSlotVisible[4] = 1;
+			}
+			if (RuleB(Custom, EnchantmentSlot4) && (!item.AugSlotVisible[3] || !item.AugSlotType[3])) {
+				item.AugSlotType[3] = 31;
+				item.AugSlotVisible[3] = 1;
+			}
+			if (RuleB(Custom, EnchantmentSlot3) && (!item.AugSlotVisible[2] || !item.AugSlotType[2])) {
+				item.AugSlotType[2] = 31;
+				item.AugSlotVisible[2] = 1;
+			}
+			if (RuleB(Custom, EnchantmentSlot2) && (!item.AugSlotVisible[1] || !item.AugSlotType[1])) {
+				item.AugSlotType[1] = 31;
+				item.AugSlotVisible[1] = 1;
+			}
+			if (RuleB(Custom, EnchantmentSlot1) && (!item.AugSlotVisible[0] || !item.AugSlotType[0])) {
+				item.AugSlotType[0] = 31;
+				item.AugSlotVisible[0] = 1;
+			}
+		}
+
 		try {
 			hash.insert(item.ID, item);
 		} catch (std::exception &ex) {
 			LogError("Database::LoadItems: {}", ex.what());
 			break;
+		}
+	}
+
+	if (RuleB(Custom, Enchantments) && RuleI(Custom, EnchantmentAugTemplate)) {
+		auto enchantment_defs 	  = EnchantmentDefinitionRepository::All(*this);
+		auto enchantment_template = hash.at(RuleI(Custom, EnchantmentAugTemplate));
+
+		for(const auto def : enchantment_defs) {
+			EQ::ItemData e = enchantment_template;
+
+			e.ID = 100000000 + def.aug_id + (1000000 * def.quality);
+			e.AugType = 0xFFFFFFFF;
+			e.Races = 65535;
+			e.Slots = def.slots;
+			e.Classes = def.classes;
+			e.NoDrop = def.nodrop;
+
+			strn0cpy(e.Name, def.name.c_str(), sizeof(e.Name));
+			strn0cpy(e.Lore, def.lore_desc.c_str(), sizeof(e.Lore));
+
+			e.Worn.Effect = def.worn_effect;
+			e.Focus.Effect = def.focus_effect;
+			e.Proc.Effect = def.focus_effect;
+			e.Click.Effect = def.click_effect;
+
+			e.Damage = def.damage;
+			e.Delay = def.delay;
+			e.ElemDmgAmt = def.elemdmgamt;
+			e.ElemDmgType = def.elemdmgtype;
+			e.BaneDmgAmt = def.banedmgamt;
+			e.BaneDmgBody = def.banedmgbody;
+			e.BaneDmgRaceAmt = def.banedmgraceamt;
+			e.BaneDmgRace = def.banedmgrace;
+
+			e.AC = def.ac;
+			e.HP = def.hp;
+			e.Mana = def.mana;
+			e.Endur = def.endur;
+
+			e.HeroicStr = def.heroic_str;
+			e.HeroicSta = def.heroic_sta;
+			e.HeroicDex = def.heroic_dex;
+			e.HeroicAgi = def.heroic_agi;
+			e.HeroicInt = def.heroic_int;
+			e.HeroicWis = def.heroic_wis;
+			e.HeroicCha = def.heroic_cha;
+			e.HeroicMR = def.heroic_mr;
+			e.HeroicFR = def.heroic_fr;
+			e.HeroicCR = def.heroic_cr;
+			e.HeroicPR = def.heroic_pr;
+			e.HeroicDR = def.heroic_dr;
+
+			e.Regen = def.regen;
+			e.ManaRegen = def.mana_regen;
+			e.EnduranceRegen = def.endur_regen;
+
+			e.SpellDmg = def.spelldmg;
+			e.HealAmt = def.healamt;
+
+			e.Accuracy = def.accuracy;
+			e.Avoidance = def.avoidance;
+			e.CombatEffects = def.combateffects;
+			e.DamageShield = def.damageshield;
+			e.DSMitigation = def.dsmitigation;
+			e.SpellShield = def.spellshield;
+			e.Shielding = def.shielding;
+			e.DotShielding = def.dotshielding;
+			e.StunResist = def.stunresist;
+			e.StrikeThrough = def.strikethrough;
+			e.Clairvoyance = def.clairvoyance;
+
+			e.SkillModType = def.skill_id;
+			e.ExtraDmgSkill = def.skill_id;
+			e.SkillModValue = def.skillmod;
+			e.ExtraDmgAmt = def.skilldmg;
+
+			e.AStr = def.astr;
+			e.ASta = def.asta;
+			e.ADex = def.adex;
+			e.AAgi = def.aagi;
+			e.AInt = def.aint;
+			e.AWis = def.awis;
+			e.ACha = def.acha;
+			e.MR = def.mr;
+			e.FR = def.fr;
+			e.CR = def.cr;
+			e.PR = def.pr;
+			e.DR = def.dr;
+
+			if (def.damage > 0 || def.elemdmgamt > 0 || def.banedmgamt > 0 || def.banedmgraceamt) {
+				e.Slots &= 6318080;
+			}
+
+			try {
+				hash.insert(e.ID, e);
+				LogDebug("Created Dynamic Aug: [{}] ID [{}]", e.Name, e.ID);
+			} catch (std::exception &ex) {
+				LogError("Database::LoadItems: {}", ex.what());
+				break;
+			}
 		}
 	}
 }
