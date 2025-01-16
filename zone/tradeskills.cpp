@@ -414,6 +414,61 @@ void Object::HandleCombine(Client* user, const NewCombine_Struct* in_combine, Ob
 				user->Message(Chat::Yellow, fmt::format("You do not have enough money to unattune your [{}]", linker.GenerateLink()).c_str());
 			}
 		}
+	} else if (container->GetItem() && container->GetItem()->ID == 69420) { // Check if this is a Cube of Enchantment
+		// 1) Look through the items in the container (only 2 slots) to get the item ID and the currency ID
+		// 2) Check if there is one valid item (IsAugmentable() && IsNotCorrupt()) and one valid currency (IsEnchantmentCurrency())
+		// 3) Branch based on the currency type into the appropriate enchanting function
+
+		// Essences
+		// Essence Tiers:
+		//   Dim Essence (1-9)
+		//   Faint Essence (10-19)
+		//   Glimmering Essence (20-29)
+		//   Shimmering Essence (30-39)
+		//   Radiant Essence (40-49)
+		//   Luminous Essence (50-59)
+		//   Resplendent Essence (60-64)
+		//   Ethereal Essence (65-69)
+		//   Prismatic Essence (70)
+
+
+		// The tier of the essence maps to the tier of the augment that it can roll.
+		// Augments and essences should use the same naming structure so that
+		// players can easily mentally map from the tier of the essence to the *maximum* tier of
+		// augment that they can expect to receive from using it.
+
+		// Generic Essence Types:
+		//   Addition: Adds a random augment to an item.
+		//   Transformation: Removes one random augment from an item and adds a new random augment
+		//   Chaos: Randomizes all augments and augment tiers on an item
+		//   Resurgence: Rerolls the tier of all augments on an item
+
+		// Targeted Essence Types:
+		//   Potency: Adds a random attribute augment to an item.
+		//   Fortification: Adds a random defense augment to an item.
+		//   Domination: Adds a random physical augment to an item.
+		//   Arcana: Adds a random caster augment to an item.
+
+		// Untiered essences:
+		//   Essence of Purity: Removes all augments from an item
+		//   Essence of Subtraction: Removes a single random augment from an item
+		//   Essence of Corruption: High risk, high reward, finishing item. Unpredictably modifies an item and prevents further enchantment of the item.
+		//     Potential outcomes:
+		//     - Upgrade a random augment to _corrupt_ tier (one tier above Prismatic)
+		//     - Remove a random augment from the item and add a null augment
+		//     - Apply chaos essence effect but replace one augment with a null augment
+		//     - Apply resurgence essence effect but replace one augment with a null augment
+		//     - Corruption can only be used on an item with full augments
+
+		// Examples:
+		//   - Using a Dim Essence of Addition will add a random augment that has appropriate stats from level 1 to 9
+		//   - Using a Luminous Essence of Transformation will remove a random augment (any tier) and add a random augment from any tier up to level 59
+		//   - Using a Radiant Essence of Chaos will remove all augments from an item and back the same number of augments, each with a tier up to level 49
+
+		// Essence rarity:
+		//   Generic essences are the most common
+		//   Targeted essences are more rare (much more desireable / powerful)
+		//   Untiered essences are the most rare (these are *very* desireable)
 	}
 
 	if (container->GetItem() && container->GetItem()->ID == 4041) {
