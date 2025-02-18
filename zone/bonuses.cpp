@@ -249,11 +249,11 @@ void Mob::ProcessItemCaps()
 
 	itembonuses.ATK = std::min(itembonuses.ATK, CalcItemATKCap());
 
-	if (IsOfClientBotMerc() && itembonuses.SpellDmg > RuleI(Character, ItemSpellDmgCap)) {
+	if ((IsOfClientBotMerc() || IsPet()) && itembonuses.SpellDmg > RuleI(Character, ItemSpellDmgCap)) {
 		itembonuses.SpellDmg = RuleI(Character, ItemSpellDmgCap);
 	}
 
-	if (IsOfClientBotMerc() && itembonuses.HealAmt > RuleI(Character, ItemHealAmtCap)) {
+	if ((IsOfClientBotMerc() || IsPet()) && itembonuses.HealAmt > RuleI(Character, ItemHealAmtCap)) {
 		itembonuses.HealAmt = RuleI(Character, ItemHealAmtCap);
 	}
 }
