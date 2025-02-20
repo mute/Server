@@ -295,14 +295,14 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 			b->AC += item->AC;
 
 			if (item->Attack != 0) {
-				unsigned int cap = RuleI(Character, ItemATKCap);
+				int cap = RuleI(Character, ItemATKCap);
 				cap += itembonuses.ItemATKCap + spellbonuses.ItemATKCap + aabonuses.ItemATKCap;
 
 				if (
 					IsOfClientBotMerc() &&
 					(b->ATK + item->Attack) > cap
 				) {
-					b->ATK = RuleI(Character, ItemATKCap);
+					b->ATK = cap;
 				} else {
 					b->ATK += item->Attack;
 				}
