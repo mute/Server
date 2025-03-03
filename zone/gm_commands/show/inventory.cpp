@@ -160,22 +160,22 @@ void ShowInventory(Client *c, const Seperator *sep)
 
 			linker.SetItemInst(inst_main);
 
-			if (item_data) {
+			if (item_data && inst_main) {
+				//auto inst = c->GetInv().GetItem(scope_bit & peekWorld ? EQ::invslot::WORLD_BEGIN + index_main : index_main);
 				c->Message(
 					Chat::White,
 					fmt::format(
-						"Slot {} | {} ({}){}",
-						((scope_bit & peekWorld) ? (EQ::invslot::WORLD_BEGIN + index_main) : index_main),
+						"Slot {} | {} ({}/{}){}",
+						scope_bit & peekWorld ? EQ::invslot::WORLD_BEGIN + index_main : index_main,
 						linker.GenerateLink(),
 						item_data->ID,
-						(
-							inst_main->IsStackable() && inst_main->GetCharges() > 0 ?
-							fmt::format(
-								" (Stack of {})",
-								inst_main->GetCharges()
-							) :
-							""
-						)
+						inst_main->GetSerialNumber(),
+						inst_main->IsStackable() && inst_main->GetCharges() > 0 ?
+						fmt::format(
+							" (Stack of {})",
+							inst_main->GetCharges()
+						) :
+						""
 					).c_str()
 				);
 			}
@@ -228,7 +228,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 				c->Message(
 					Chat::White,
 					fmt::format(
-						"Slot {} Bag Slot {} | {} ({}){}",
+						"Slot {} Bag Slot {}/{} | {} ({}/{}){}",
 						(
 							(scope_bit & peekWorld) ?
 							INVALID_INDEX :
@@ -238,6 +238,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 						sub_index,
 						linker.GenerateLink(),
 						item_data->ID,
+						inst_sub->GetSerialNumber(),
 						(
 							inst_sub->IsStackable() && inst_sub->GetCharges() > 0 ?
 							fmt::format(
@@ -309,7 +310,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 						Chat::White,
 						fmt::format(
 							"Slot {} | {} ({}){}",
-							(8000 + limboIndex),
+							(14000 + limboIndex),
 							item_data->ID,
 							linker.GenerateLink(),
 							(
@@ -338,7 +339,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 							Chat::White,
 							fmt::format(
 								"Slot {} (Augment Slot {}) | {} ({}){}",
-								(8000 + limboIndex),
+								(14000 + limboIndex),
 								augment_index,
 								linker.GenerateLink(),
 								item_data->ID,
@@ -374,7 +375,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 							Chat::White,
 							fmt::format(
 								"Slot {} Bag Slot {} | {} ({}){}",
-								(8000 + limboIndex),
+								(14000 + limboIndex),
 								sub_index,
 								linker.GenerateLink(),
 								item_data->ID,
@@ -406,7 +407,7 @@ void ShowInventory(Client *c, const Seperator *sep)
 								Chat::White,
 								fmt::format(
 									"Slot {} Bag Slot {} (Augment Slot {}) | {} ({}){}",
-									(8000 + limboIndex),
+									(14000 + limboIndex),
 									sub_index,
 									augment_index,
 									linker.GenerateLink(),

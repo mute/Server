@@ -39,7 +39,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "../common/zone_store.h"
 #include "dynamic_zone.h"
 #include "dynamic_zone_manager.h"
-#include "expedition_message.h"
 #include "shared_task_world_messaging.h"
 #include "../common/shared_tasks.h"
 #include "shared_task_manager.h"
@@ -50,6 +49,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "../zone/data_bucket.h"
 #include "../common/repositories/guild_tributes_repository.h"
 #include "../common/skill_caps.h"
+#include "../common/server_reload_types.h"
 
 extern ClientList client_list;
 extern GroupLFPList LFPGroupList;
@@ -1353,22 +1353,8 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 			safe_delete(outapp);
 			break;
 		}
-		case ServerOP_Speech:
-		case ServerOP_QSSendQuery:
-		case ServerOP_QSPlayerLogDeletes:
-		case ServerOP_QSPlayerDropItem:
-		case ServerOP_QSPlayerLogHandins:
-		case ServerOP_QSPlayerLogMerchantTransactions:
-		case ServerOP_QSPlayerLogMoves:
-		case ServerOP_QSPlayerLogNPCKills:
-		case ServerOP_QSPlayerLogTrades:
 		case ServerOP_QueryServGeneric: {
 			QSLink.SendPacket(pack);
-			break;
-		}
-		case ServerOP_ReloadOpcodes: {
-			ReloadAllPatches();
-			zoneserver_list.SendPacket(pack);
 			break;
 		}
 		case ServerOP_CZDialogueWindow:
@@ -1384,10 +1370,6 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 		case ServerOP_Consent:
 		case ServerOP_DepopAllPlayersCorpses:
 		case ServerOP_DepopPlayerCorpse:
-		case ServerOP_ExpeditionLockState:
-		case ServerOP_ExpeditionLockout:
-		case ServerOP_ExpeditionLockoutDuration:
-		case ServerOP_ExpeditionReplayOnJoin:
 		case ServerOP_GuildRankUpdate:
 		case ServerOP_ItemStatus:
 		case ServerOP_KickPlayer:
@@ -1398,31 +1380,9 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 		case ServerOP_RaidGroupSay:
 		case ServerOP_RaidSay:
 		case ServerOP_RefreshCensorship:
-		case ServerOP_ReloadAAData:
-		case ServerOP_ReloadAlternateCurrencies:
-		case ServerOP_ReloadBaseData:
-		case ServerOP_ReloadBlockedSpells:
-		case ServerOP_ReloadCommands:
-		case ServerOP_ReloadDoors:
-		case ServerOP_ReloadDataBucketsCache:
-		case ServerOP_ReloadFactions:
-		case ServerOP_ReloadGroundSpawns:
-		case ServerOP_ReloadLevelEXPMods:
-		case ServerOP_ReloadMerchants:
-		case ServerOP_ReloadNPCEmotes:
-		case ServerOP_ReloadObjects:
-		case ServerOP_ReloadPerlExportSettings:
-		case ServerOP_ReloadStaticZoneData:
-		case ServerOP_ReloadTitles:
-		case ServerOP_ReloadTraps:
-		case ServerOP_ReloadVariables:
-		case ServerOP_ReloadVeteranRewards:
-		case ServerOP_ReloadWorld:
-		case ServerOP_ReloadZonePoints:
-		case ServerOP_ReloadZoneData:
-		case ServerOP_ReloadLoot:
 		case ServerOP_RezzPlayerAccept:
 		case ServerOP_SpawnStatusChange:
+		case ServerOP_TraderMessaging:
 		case ServerOP_UpdateSpawn:
 		case ServerOP_WWDialogueWindow:
 		case ServerOP_WWLDoNUpdate:
@@ -1437,14 +1397,9 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 			zoneserver_list.SendPacket(pack);
 			break;
 		}
-		case ServerOP_ReloadSkillCaps: {
-			zoneserver_list.SendPacket(pack);
-			skill_caps.ReloadSkillCaps();
-			break;
-		}
-		case ServerOP_ReloadRules: {
-			zoneserver_list.SendPacket(pack);
-			RuleManager::Instance()->LoadRules(&database, "default", true);
+		case ServerOP_ServerReloadRequest: {
+			auto o = (ServerReload::Request*) pack->pBuffer;
+			zoneserver_list.SendServerReload((ServerReload::Type) o->type, pack->pBuffer);
 			break;
 		}
 		case ServerOP_IsOwnerOnline: {
@@ -1470,28 +1425,6 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 			if (zs) {
 				zs->SendPacket(pack);
 			}
-			break;
-		}
-		case ServerOP_ReloadContentFlags: {
-			zoneserver_list.SendPacket(pack);
-			content_service.SetExpansionContext()->ReloadContentFlags();
-			break;
-		}
-		case ServerOP_ReloadLogs: {
-			zoneserver_list.SendPacket(pack);
-			UCSLink.SendPacket(pack);
-			LogSys.LoadLogDatabaseSettings();
-			player_event_logs.ReloadSettings();
-			break;
-		}
-		case ServerOP_ReloadTasks: {
-			shared_task_manager.LoadTaskData();
-			zoneserver_list.SendPacket(pack);
-			break;
-		}
-		case ServerOP_ReloadDzTemplates: {
-			dynamic_zone_manager.LoadTemplates();
-			zoneserver_list.SendPacket(pack);
 			break;
 		}
 		case ServerOP_ChangeSharedMem: {
@@ -1538,16 +1471,11 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 			SharedTaskWorldMessaging::HandleZoneMessage(pack);
 			break;
 		}
-		case ServerOP_ExpeditionCreate:
-		case ServerOP_ExpeditionDzAddPlayer:
-		case ServerOP_ExpeditionDzMakeLeader:
-		case ServerOP_ExpeditionCharacterLockout:
-		case ServerOP_ExpeditionSaveInvite:
-		case ServerOP_ExpeditionRequestInvite: {
-			ExpeditionMessage::HandleZoneMessage(pack);
-			break;
-		}
 		case ServerOP_DzCreated:
+		case ServerOP_DzAddPlayer:
+		case ServerOP_DzSaveInvite:
+		case ServerOP_DzRequestInvite:
+		case ServerOP_DzMakeLeader:
 		case ServerOP_DzAddRemoveMember:
 		case ServerOP_DzSwapMembers:
 		case ServerOP_DzRemoveAllMembers:
@@ -1558,13 +1486,13 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 		case ServerOP_DzSetZoneIn:
 		case ServerOP_DzSetSwitchID:
 		case ServerOP_DzMovePC:
+		case ServerOP_DzLock:
+		case ServerOP_DzReplayOnJoin:
+		case ServerOP_DzLockout:
+		case ServerOP_DzLockoutDuration:
+		case ServerOP_DzCharacterLockout:
 		case ServerOP_DzUpdateMemberStatus: {
-			DynamicZone::HandleZoneMessage(pack);
-			break;
-		}
-		case ServerOP_DataBucketCacheUpdate: {
-			zoneserver_list.SendPacket(pack);
-
+			dynamic_zone_manager.HandleZoneMessage(pack);
 			break;
 		}
 		case ServerOP_GuildTributeUpdate: {
@@ -1740,8 +1668,62 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 			}
 
 			zoneserver_list.SendPacketToBootedZones(pack);
+			break;
+		}
+		case ServerOP_BazaarPurchase: {
+			auto in = (BazaarPurchaseMessaging_Struct *)pack->pBuffer;
+			if (in->trader_buy_struct.trader_id <= 0) {
+				LogTrading(
+					"World Message <red>[{}] received with invalid trader_id <red>[{}]",
+					"ServerOP_BazaarPurchase",
+					in->trader_buy_struct.trader_id
+				);
+				return;
+			}
+
+			auto trader = client_list.FindCLEByCharacterID(in->trader_buy_struct.trader_id);
+			if (trader) {
+				zoneserver_list.SendPacket(trader->zone(), trader->instance(), pack);
+			}
 
 			break;
+		}
+		case ServerOP_BuyerMessaging: {
+			auto in = (BuyerMessaging_Struct *)pack->pBuffer;
+			switch (in->action) {
+				case Barter_AddToBarterWindow:
+				case Barter_RemoveFromBarterWindow: {
+					if (in->buyer_id <= 0) {
+						LogTrading("World Message <red>[{}] received with invalid buyer_id <red>[{}]",
+								   "ServerOP_BecomeBuyer",
+								   in->buyer_id
+						);
+						return;
+					}
+
+					zoneserver_list.SendPacketToBootedZones(pack);
+					break;
+				}
+				case Barter_SellItem: {
+					auto buyer = client_list.FindCharacter(in->buyer_name);
+					if (buyer) {
+						zoneserver_list.SendPacket(buyer->zone(), buyer->instance(), pack);
+					}
+
+					break;
+				}
+				case Barter_FailedTransaction:
+				case Barter_BuyerTransactionComplete: {
+					auto seller = client_list.FindCharacter(in->seller_name);
+					if (seller) {
+						zoneserver_list.SendPacket(seller->zone(), seller->instance(), pack);
+					}
+
+					break;
+				}
+				default:
+					return;
+			}
 		}
 		default: {
 			LogInfo("Unknown ServerOPcode from zone {:#04x}, size [{}]", pack->opcode, pack->size);

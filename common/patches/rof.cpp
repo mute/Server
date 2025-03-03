@@ -1213,22 +1213,22 @@ namespace RoF
 		case 1: { // GuildBankItemUpdate
 			auto emu = (GuildBankItemUpdate_Struct *)in->pBuffer;
 			auto eq = (structs::GuildBankItemUpdate_Struct *)outapp->pBuffer;
-			eq->Action = 0;
-			OUT(Unknown004);
-			eq->Unknown08 = 0;
-			OUT(SlotID);
-			OUT(Area);
-			OUT(Unknown012);
-			OUT(ItemID);
-			OUT(Icon);
-			OUT(Quantity);
-			OUT(Permissions);
-			OUT(AllowMerge);
-			OUT(Useable);
-			OUT_str(ItemName);
-			OUT_str(Donator);
-			OUT_str(WhoFor);
-			OUT(Unknown226);
+			eq->action = 0;
+			OUT(unknown004);
+			eq->unknown008 = 0;
+			OUT(slot_id);
+			OUT(area);
+			OUT(display);
+			OUT(item_id);
+			OUT(icon_id);
+			OUT(quantity);
+			OUT(permissions);
+			OUT(allow_merge);
+			OUT(is_useable);
+			OUT_str(item_name);
+			OUT_str(donator);
+			OUT_str(who_for);
+			OUT(unknown226);
 			break;
 		}
 		default:
@@ -3494,14 +3494,13 @@ namespace RoF
 			ENCODE_LENGTH_EXACT(ClickTrader_Struct);
 			SETUP_DIRECT_ENCODE(ClickTrader_Struct, structs::ClickTrader_Struct);
 
-			eq->Code = emu->Code;
-			// Live actually has 200 items now, but 80 is the most our internal struct supports
-			for (uint32 i = 0; i < 200; i++)
+			eq->Code = emu->action;
+			for (uint32 i = 0; i < RoF::invtype::BAZAAR_SIZE; i++)
 			{
 				strncpy(eq->items[i].SerialNumber, "0000000000000000", sizeof(eq->items[i].SerialNumber));
 				eq->items[i].Unknown18 = 0;
 				if (i < 80) {
-					eq->ItemCost[i] = emu->ItemCost[i];
+					eq->ItemCost[i] = emu->item_cost[i];
 				}
 				else {
 					eq->ItemCost[i] = 0;
@@ -3515,9 +3514,9 @@ namespace RoF
 			ENCODE_LENGTH_EXACT(Trader_ShowItems_Struct);
 			SETUP_DIRECT_ENCODE(Trader_ShowItems_Struct, structs::Trader_ShowItems_Struct);
 
-			eq->Code = emu->Code;
+			eq->Code = emu->action;
 			strncpy(eq->SerialNumber, "0000000000000000", sizeof(eq->SerialNumber));
-			eq->TraderID = emu->TraderID;
+			eq->TraderID = emu->entity_id;
 			eq->Stacksize = 0;
 			eq->Price = 0;
 
@@ -3543,13 +3542,13 @@ namespace RoF
 		ENCODE_LENGTH_EXACT(TraderBuy_Struct);
 		SETUP_DIRECT_ENCODE(TraderBuy_Struct, structs::TraderBuy_Struct);
 
-		OUT(Action);
-		OUT(Price);
-		OUT(TraderID);
-		memcpy(eq->ItemName, emu->ItemName, sizeof(eq->ItemName));
-		OUT(ItemID);
-		OUT(Quantity);
-		OUT(AlreadySold);
+		OUT(action);
+		OUT(price);
+		OUT(trader_id);
+		memcpy(eq->item_name, emu->item_name, sizeof(eq->item_name));
+		OUT(item_id);
+		OUT(quantity);
+		OUT(already_sold);
 
 		FINISH_ENCODE();
 	}
@@ -5041,12 +5040,11 @@ namespace RoF
 			SETUP_DIRECT_DECODE(ClickTrader_Struct, structs::ClickTrader_Struct);
 			MEMSET_IN(ClickTrader_Struct);
 
-			emu->Code = eq->Code;
-			// Live actually has 200 items now, but 80 is the most our internal struct supports
-			for (uint32 i = 0; i < 80; i++)
+			emu->action = eq->Code;
+			for (uint32 i = 0; i < RoF::invtype::BAZAAR_SIZE; i++)
 			{
-				emu->SerialNumber[i] = 0;	// eq->SerialNumber[i];
-				emu->ItemCost[i] = eq->ItemCost[i];
+				emu->serial_number[i] = 0;    // eq->SerialNumber[i];
+				emu->item_cost[i]     = eq->ItemCost[i];
 			}
 
 			FINISH_DIRECT_DECODE();
@@ -5057,8 +5055,8 @@ namespace RoF
 			SETUP_DIRECT_DECODE(Trader_ShowItems_Struct, structs::Trader_ShowItems_Struct);
 			MEMSET_IN(Trader_ShowItems_Struct);
 
-			emu->Code = eq->Code;
-			emu->TraderID = eq->TraderID;
+			emu->action = eq->Code;
+			emu->entity_id = eq->TraderID;
 
 			FINISH_DIRECT_DECODE();
 		}
@@ -5080,12 +5078,12 @@ namespace RoF
 		SETUP_DIRECT_DECODE(TraderBuy_Struct, structs::TraderBuy_Struct);
 		MEMSET_IN(TraderBuy_Struct);
 
-		IN(Action);
-		IN(Price);
-		IN(TraderID);
-		memcpy(emu->ItemName, eq->ItemName, sizeof(emu->ItemName));
-		IN(ItemID);
-		IN(Quantity);
+		IN(action);
+		IN(price);
+		IN(trader_id);
+		memcpy(emu->item_name, eq->item_name, sizeof(emu->item_name));
+		IN(item_id);
+		IN(quantity);
 
 		FINISH_DIRECT_DECODE();
 	}
@@ -5190,7 +5188,14 @@ namespace RoF
 
 		//sprintf(hdr.unknown000, "06e0002Y1W00");
 
-		snprintf(hdr.unknown000, sizeof(hdr.unknown000), "%016d", item->ID);
+		strn0cpy(
+			hdr.unknown000,
+			fmt::format(
+				"{:016}\0",
+				packet_type == ItemPacketInvalid ? 0 : inst->GetSerialNumber()
+			).c_str(),
+			sizeof(hdr.unknown000)
+		);
 
 		hdr.stacksize = (inst->IsStackable() ? ((inst->GetCharges() > 1000) ? 0xFFFFFFFF : inst->GetCharges()) : 1);
 		hdr.unknown004 = 0;

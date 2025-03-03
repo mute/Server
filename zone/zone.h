@@ -47,6 +47,8 @@
 #include "../common/repositories/lootdrop_entries_repository.h"
 #include "../common/repositories/base_data_repository.h"
 #include "../common/repositories/skill_caps_repository.h"
+#include "../common/repositories/zone_state_spawns_repository.h"
+#include "../common/repositories/spawn2_disabled_repository.h"
 
 struct EXPModifier
 {
@@ -93,7 +95,6 @@ struct ZoneEXPModInfo {
 };
 
 class Client;
-class Expedition;
 class Map;
 class Mob;
 class WaterMap;
@@ -105,7 +106,7 @@ class MobMovementManager;
 class Zone {
 public:
 	static bool Bootup(uint32 iZoneID, uint32 iInstanceID, bool is_static = false);
-	static void Shutdown(bool quiet = false);
+	void Shutdown(bool quiet = false);
 
 	Zone(uint32 in_zoneid, uint32 in_instanceid, const char *in_short_name);
 	~Zone();
@@ -125,6 +126,7 @@ public:
 	bool CanCastOutdoor() const { return (can_castoutdoor); } //qadar
 	bool CanDoCombat() const { return (can_combat); }
 	bool CanLevitate() const { return (can_levitate); } // Magoth78
+	bool IsWaterZone(float z);
 	bool Depop(bool StartSpawnTimer = false);
 	bool did_adventure_actions;
 	bool GetAuth(
@@ -154,9 +156,7 @@ public:
 	bool Process();
 	bool SaveZoneCFG();
 	bool DoesAlternateCurrencyExist(uint32 currency_id);
-
-	int GetNpcPositionUpdateDistance() const;
-	void SetNpcPositionUpdateDistance(int in_npc_position_update_distance);
+	void DisableRespawnTimers();
 
 	char *adv_data;
 
@@ -238,10 +238,11 @@ public:
 	std::vector<GridEntriesRepository::GridEntries> zone_grid_entries;
 
 	std::unordered_map<uint32, std::unique_ptr<DynamicZone>> dynamic_zone_cache;
-	std::unordered_map<uint32, std::unique_ptr<Expedition>>  expedition_cache;
 	std::unordered_map<uint32, DynamicZoneTemplatesRepository::DynamicZoneTemplates> dz_template_cache;
 
 	std::unordered_map<uint32, EXPModifier> exp_modifiers;
+
+	std::vector<uint32> discovered_items;
 
 	time_t weather_timer;
 	Timer  spawn2_timer;
@@ -312,7 +313,6 @@ public:
 	void LoadVeteranRewards();
 	void LoadZoneDoors();
 	void ReloadStaticData();
-	void ReloadWorld(uint8 global_repop);
 	void RemoveAuth(const char *iCharName, const char *iLSKey);
 	void RemoveAuth(uint32 lsid);
 	void Repop(bool is_forced = false);
@@ -334,7 +334,7 @@ public:
 	bool IsQuestHotReloadQueued() const;
 	void SetQuestHotReloadQueued(bool in_quest_hot_reload_queued);
 
-	bool CompareDataBucket(uint8 bucket_comparison, const std::string& bucket_value, const std::string& player_value);
+	bool CompareDataBucket(uint8 comparison_type, const std::string& bucket, const std::string& value);
 
 	WaterMap *watermap;
 	ZonePoint *GetClosestZonePoint(const glm::vec3 &location, uint32 to, Client *client, float max_distance = 40000.0f);
@@ -416,7 +416,7 @@ public:
 		SendDiscordMessage(webhook_id, message_prefix + Discord::FormatDiscordMessage(log_category, message));
 	};
 
-	double GetMaxMovementUpdateRange() const { return max_movement_update_range; }
+	double GetClientUpdateRange() const { return m_client_update_range; }
 
 	void SetIsHotzone(bool is_hotzone);
 
@@ -440,6 +440,7 @@ public:
 	// loot
 	void LoadLootTable(const uint32 loottable_id);
 	void LoadLootTables(const std::vector<uint32> in_loottable_ids);
+	void LoadLootDrops(const std::vector<uint32> in_lootdrop_ids);
 	void ClearLootTables();
 	void ReloadLootTables();
 	LoottableRepository::Loottable *GetLootTable(const uint32 loottable_id);
@@ -453,6 +454,22 @@ public:
 	void LoadBaseData();
 	void ReloadBaseData();
 
+	// data buckets
+	std::string GetBucket(const std::string& bucket_name);
+	void SetBucket(const std::string& bucket_name, const std::string& bucket_value, const std::string& expiration = "");
+	void DeleteBucket(const std::string& bucket_name);
+	std::string GetBucketExpires(const std::string& bucket_name);
+	std::string GetBucketRemaining(const std::string& bucket_name);
+	inline void SetZoneServerId(uint32 id) { m_zone_server_id = id; }
+	inline uint32 GetZoneServerId() const { return m_zone_server_id; }
+
+	// zone state
+	bool LoadZoneState(
+		std::unordered_map<uint32, uint32> spawn_times,
+		std::vector<Spawn2DisabledRepository::Spawn2Disabled> disabled_spawns
+	);
+	void SaveZoneState();
+	static void ClearZoneState(uint32 zone_id, uint32 instance_id);
 
 private:
 	bool      allow_mercs;
@@ -468,7 +485,7 @@ private:
 	bool      staticzone;
 	bool      zone_has_current_time;
 	bool      quest_hot_reload_queued;
-	double    max_movement_update_range;
+	double    m_client_update_range;
 	char      *long_name;
 	char      *map_name;
 	char      *short_name;
@@ -517,6 +534,8 @@ private:
 
 	// Base Data
 	std::vector<BaseDataRepository::BaseData> m_base_data = { };
+
+	uint32_t m_zone_server_id = 0;
 };
 
 #endif

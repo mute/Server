@@ -419,7 +419,7 @@ void ClientTaskState::RecordCompletedTask(uint32_t character_id, const TaskInfor
 			[&](const CompletedTaskInformation& completed) { return completed.task_id == client_task.task_id; }
 		), m_completed_tasks.end());
 
-		size_t erased = m_completed_tasks.size() - before;
+		size_t erased = before - m_completed_tasks.size();
 
 		LogTasksDetail("KeepOneRecord erased [{}] elements", erased);
 
@@ -869,7 +869,12 @@ int ClientTaskState::IncrementDoneCount(
 	if (task_data->type != TaskType::Shared) {
 		// live messages for each increment of non-shared tasks
 		auto activity_type = task_data->activity_information[activity_id].activity_type;
-		int msg_count = activity_type == TaskActivityType::GiveCash ? 1 : count;
+		int msg_count = 1;
+
+		if (activity_type != TaskActivityType::GiveCash) {
+			msg_count = std::min(count, RuleI(TaskSystem, MaxUpdateMessages));
+		}
+
 		for (int i = 0; i < msg_count; ++i) {
 			client->MessageString(Chat::DefaultText, TASK_UPDATED, task_data->title.c_str());
 		}
@@ -909,17 +914,6 @@ int ClientTaskState::IncrementDoneCount(
 				parse->EventPlayer(EVENT_TASK_STAGE_COMPLETE, client, export_string, 0);
 			}
 		}
-		/* QS: PlayerLogTaskUpdates :: Update */
-		if (RuleB(QueryServ, PlayerLogTaskUpdates)) {
-			std::string event_desc = StringFormat(
-				"Task Stage Complete :: taskid:%i activityid:%i donecount:%i in zoneid:%i instid:%i",
-				info->task_id,
-				info->activity[activity_id].activity_id,
-				info->activity[activity_id].done_count,
-				client->GetZoneID(),
-				client->GetInstanceID());
-			QServ->PlayerLogEvent(Player_Log_Task_Updates, client->CharacterID(), event_desc);
-		}
 
 		// If this task is now complete, the Completed tasks will have been
 		// updated in UnlockActivities. Send the completed task list to the
@@ -942,18 +936,6 @@ int ClientTaskState::IncrementDoneCount(
 				RecordPlayerEventLogWithClient(client, PlayerEvent::TASK_COMPLETE, e);
 			}
 
-			/* QS: PlayerLogTaskUpdates :: Complete */
-			if (RuleB(QueryServ, PlayerLogTaskUpdates)) {
-				std::string event_desc = StringFormat(
-					"Task Complete :: taskid:%i activityid:%i donecount:%i in zoneid:%i instid:%i",
-					info->task_id,
-					info->activity[activity_id].activity_id,
-					info->activity[activity_id].done_count,
-					client->GetZoneID(),
-					client->GetInstanceID());
-				QServ->PlayerLogEvent(Player_Log_Task_Updates, client->CharacterID(), event_desc);
-			}
-
 			client->SendTaskActivityComplete(info->task_id, 0, task_index, task_data->type, 0);
 
 			// If Experience and/or cash rewards are set, reward them from the task even if reward_method is METHODQUEST
@@ -970,6 +952,8 @@ int ClientTaskState::IncrementDoneCount(
 
 				client->CancelTask(task_index, task_data->type);
 			}
+
+			client->LoadClientSharedCompletedTasks();
 		}
 	}
 	else {
@@ -1044,6 +1028,7 @@ void ClientTaskState::RewardTask(Client *c, const TaskInformation *ti, ClientTas
 			if (item_id > 0) {
 				std::unique_ptr<EQ::ItemInstance> inst(database.CreateItem(item_id, charges));
 				if (inst && inst->GetItem()) {
+					c->CheckItemDiscoverability(item_id);
 					bool stacked = c->TryStacking(inst.get());
 					if (!stacked) {
 						int16_t slot = c->GetInv().FindFreeSlot(inst->IsClassBag(), true, inst->GetItem()->Size);
@@ -1578,25 +1563,43 @@ int ClientTaskState::TaskTimeLeft(int task_id)
 	return -1;
 }
 
-int ClientTaskState::IsTaskCompleted(int task_id)
+bool ClientTaskState::IsTaskCompleted(int task_id, Client *c)
 {
-
-	// Returns:	-1 if RecordCompletedTasks is not true
-	//		+1 if the task has been completed
-	//		0 if the task has not been completed
-
-	if (!(RuleB(TaskSystem, RecordCompletedTasks))) {
-		return -1;
+	if (!RuleB(TaskSystem, RecordCompletedTasks)) {
+		return false;
 	}
 
-	for (auto &completed_task : m_completed_tasks) {
-		LogTasks("Comparing completed task [{}] with [{}]", completed_task.task_id, task_id);
-		if (completed_task.task_id == task_id) {
-			return 1;
+	for (const auto& e : m_completed_tasks) {
+		LogTasks("Comparing completed task [{}] with [{}]", e.task_id, task_id);
+		if (e.task_id == task_id) {
+			return true;
 		}
 	}
 
-	return 0;
+	if (c) {
+		for (auto &e: c->GetCompletedSharedTasks()) {
+			if (e == task_id) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool ClientTaskState::AreTasksCompleted(const std::vector<int>& task_ids)
+{
+	if (!RuleB(TaskSystem, RecordCompletedTasks)) {
+		return false;
+	}
+
+	for (const auto& e : task_ids) {
+		if (!IsTaskCompleted(e)) {
+			return false;
+		}
+	}
+
+	return true;
 }
 
 bool ClientTaskState::TaskOutOfTime(TaskType task_type, int index)
@@ -2295,12 +2298,10 @@ void ClientTaskState::CreateTaskDynamicZone(Client* client, int task_id, Dynamic
 	dz_request.SetMinPlayers(task->min_players);
 	dz_request.SetMaxPlayers(task->max_players);
 
-	// a task might create a dz from an objective so override dz duration to time remaining
-	// live probably creates the dz with the shared task and just adds members for objectives
+	// a task might create a dz from an element so override dz duration to time remaining
 	std::chrono::seconds seconds(TaskTimeLeft(task_id));
 	if (task->duration == 0 || seconds.count() < 0)
 	{
-		// todo: maybe add a rule for duration
 		// cap unlimited duration tasks so instance isn't held indefinitely
 		// expected behavior is to re-acquire any unlimited tasks that have an expired dz
 		seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::hours(24));
@@ -2308,32 +2309,21 @@ void ClientTaskState::CreateTaskDynamicZone(Client* client, int task_id, Dynamic
 
 	dz_request.SetDuration(static_cast<uint32_t>(seconds.count()));
 
-	if (task->type == TaskType::Task || task->type == TaskType::Quest)
-	{
-		if (task->type == TaskType::Task) {
-			dz_request.SetType(DynamicZoneType::Task);
-		} else {
-			dz_request.SetType(DynamicZoneType::Quest);
-		}
-
-		// todo: can enable non-shared task dz creation when dz ids are persisted for them (db also)
-		//DynamicZoneMember solo_member{ client->CharacterID(), client->GetCleanName() };
-		//DynamicZone::CreateNew(dz_request, { solo_member });
-	}
-	else if (task->type == TaskType::Shared)
+	if (task->type == TaskType::Shared)
 	{
 		dz_request.SetType(DynamicZoneType::Mission);
 
 		// shared task missions are created in world
-		EQ::Net::DynamicPacket dyn_pack = dz_request.GetSerializedDzPacket();
+		std::ostringstream ss = dz_request.GetSerialized();
+		std::string_view sv = ss.view();
 
-		auto pack_size = sizeof(ServerSharedTaskCreateDynamicZone_Struct) + dyn_pack.Length();
+		auto pack_size = sizeof(ServerSharedTaskCreateDynamicZone_Struct) + sv.size();
 		auto pack = std::make_unique<ServerPacket>(ServerOP_SharedTaskCreateDynamicZone, static_cast<uint32_t>(pack_size));
 		auto buf = reinterpret_cast<ServerSharedTaskCreateDynamicZone_Struct*>(pack->pBuffer);
 		buf->source_character_id = client->CharacterID();
 		buf->task_id = task_id;
-		buf->cereal_size = static_cast<uint32_t>(dyn_pack.Length());
-		memcpy(buf->cereal_data, dyn_pack.Data(), dyn_pack.Length());
+		buf->cereal_size = static_cast<uint32_t>(sv.size());
+		memcpy(buf->cereal_data, sv.data(), sv.size());
 
 		worldserver.SendPacket(pack.get());
 	}

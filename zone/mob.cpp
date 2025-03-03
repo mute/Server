@@ -52,7 +52,7 @@ Mob::Mob(
 	uint8 in_gender,
 	uint16 in_race,
 	uint8 in_class,
-	bodyType in_bodytype,
+	uint8 in_bodytype,
 	uint8 in_deity,
 	uint8 in_level,
 	uint32 in_npctype_id,
@@ -125,11 +125,13 @@ Mob::Mob(
 	tmHidden(-1),
 	mitigation_ac(0),
 	m_specialattacks(eSpecialAttacks::None),
-	attack_anim_timer(500),
+	attack_anim_timer(100),
 	position_update_melee_push_timer(500),
 	hate_list_cleanup_timer(6000),
-	mob_close_scan_timer(6000),
-	mob_check_moving_timer(1000)
+	m_scan_close_mobs_timer(6000),
+	m_see_close_mobs_timer(1000),
+	m_mob_check_moving_timer(1000),
+	bot_attack_flag_timer(10000)
 {
 	mMovementManager = &MobMovementManager::Get();
 	mMovementManager->AddMob(this);
@@ -400,6 +402,10 @@ Mob::Mob(
 	pet_owner_npc     = false;
 	pet_targetlock_id = 0;
 
+	//bot attack flag
+	bot_attack_flags.clear();
+	bot_attack_flag_timer.Disable();
+
 	attacked_count = 0;
 	mezzed         = false;
 	stunned        = false;
@@ -487,6 +493,8 @@ Mob::Mob(
 	m_AllowBeneficial = false;
 	m_DisableMelee    = false;
 
+	SetMerchantSessionEntityID(0);
+
 	for (int i = 0; i < EQ::skills::HIGHEST_SKILL + 2; i++) {
 		SkillDmgTaken_Mod[i] = 0;
 	}
@@ -512,7 +520,7 @@ Mob::Mob(
 
 	m_manual_follow = false;
 
-	mob_close_scan_timer.Trigger();
+	m_scan_close_mobs_timer.Trigger();
 
 	SetCanOpenDoors(true);
 
@@ -523,6 +531,9 @@ Mob::Mob(
 
 Mob::~Mob()
 {
+	entity_list.RemoveMobFromCloseLists(this);
+	m_close_mobs.clear();
+
 	quest_manager.stopalltimers(this);
 
 	mMovementManager->RemoveMob(this);
@@ -562,10 +573,9 @@ Mob::~Mob()
 	entity_list.UnMarkNPC(GetID());
 	UninitializeBuffSlots();
 
-	entity_list.RemoveMobFromCloseLists(this);
 	entity_list.RemoveAuraFromMobs(this);
 
-	close_mobs.clear();
+	ClearDataBucketCache();
 
 	LeaveHealRotationTargetPool();
 }
@@ -696,14 +706,14 @@ bool Mob::IsInvisible(Mob* other) const
 	}
 
 	//check invis vs. undead
-	if (other->GetBodyType() == BT_Undead || other->GetBodyType() == BT_SummonedUndead) {
+	if (other->GetBodyType() == BodyType::Undead || other->GetBodyType() == BodyType::SummonedUndead) {
 		if (invisible_undead && (invisible_undead > other->SeeInvisibleUndead())) {
 			return true;
 		}
 	}
 
 	//check invis vs. animals. //TODO: should we have a specific see invisible animal stat or this how live does it?
-	if (other->GetBodyType() == BT_Animal){
+	if (other->GetBodyType() == BodyType::Animal){
 		if (invisible_animals && (invisible_animals > other->SeeInvisible())) {
 			return true;
 		}
@@ -877,8 +887,9 @@ int Mob::_GetRunSpeed() const {
 
 int Mob::_GetFearSpeed() const {
 
-	if (IsRooted() || IsStunned() || IsMezzed())
+	if (IsRooted() || IsStunned() || IsMezzed()) {
 		return 0;
+	}
 
 	//float speed_mod = fearspeed;
 	int speed_mod = GetBaseFearSpeed();
@@ -1260,8 +1271,6 @@ void Mob::CreateSpawnPacket(EQApplicationPacket* app, NewSpawn_Struct* ns) {
 	} else {
 		strcpy(ns2->spawn.lastName, ns->spawn.lastName);
 	}
-
-	memset(&app->pBuffer[sizeof(Spawn_Struct)-7], 0xFF, 7);
 }
 
 void Mob::FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho)
@@ -1515,16 +1524,12 @@ void Mob::SendHPUpdate(bool force_update_all)
 				last_hp
 			);
 
-			auto client_packet     = new EQApplicationPacket(OP_HPUpdate, sizeof(SpawnHPUpdate_Struct));
-			auto *hp_packet_client = (SpawnHPUpdate_Struct *) client_packet->pBuffer;
-
-			hp_packet_client->cur_hp   = static_cast<uint32>(CastToClient()->GetHP() - itembonuses.HP);
-			hp_packet_client->spawn_id = GetID();
-			hp_packet_client->max_hp   = CastToClient()->GetMaxHP() - itembonuses.HP;
-
-			CastToClient()->QueuePacket(client_packet);
-
-			safe_delete(client_packet);
+			static EQApplicationPacket p(OP_HPUpdate, sizeof(SpawnHPUpdate_Struct));
+			auto b = (SpawnHPUpdate_Struct*) p.pBuffer;
+			b->cur_hp   = static_cast<uint32>(CastToClient()->GetHP() - itembonuses.HP);
+			b->spawn_id = GetID();
+			b->max_hp   = CastToClient()->GetMaxHP() - itembonuses.HP;
+			CastToClient()->QueuePacket(&p);
 
 			ResetHPUpdateTimer();
 
@@ -1686,6 +1691,13 @@ void Mob::StopMoving()
 
 void Mob::StopMoving(float new_heading)
 {
+	if (IsBot()) {
+		auto bot = CastToBot();
+
+		bot->SetCombatJitterFlag(false);
+		bot->SetCombatOutOfRangeJitterFlag(false);
+	}
+
 	StopNavigation();
 	RotateTo(new_heading);
 
@@ -2129,16 +2141,16 @@ void Mob::SendStatsWindow(Client* c, bool use_window)
 				fmt::format(
 					"{}: {} / {}",
 					mod2a_name,
-					Strings::Commify(mod2a),
-					Strings::Commify(mod2a_cap)
+					mod2a,
+					mod2a_cap
 				)
 			) +
 			DialogueWindow::TableCell(
 				fmt::format(
 					"{}: {} / {}",
 					mod2b_name,
-					Strings::Commify(mod2b),
-					Strings::Commify(mod2b_cap)
+					mod2b,
+					mod2b_cap
 				)
 			)
 		);
@@ -2415,7 +2427,7 @@ void Mob::SendStatsWindow(Client* c, bool use_window)
 				DialogueWindow::TableCell(
 					fmt::format(
 						"{} ({})",
-						Strings::Commify(GetHaste()),
+						IsClient() ? Strings::Commify(CastToClient()->GetHaste()) : Strings::Commify(GetHaste()),
 						Strings::Commify(RuleI(Character, HasteCap))
 					)
 				)
@@ -2682,12 +2694,12 @@ void Mob::SendStatsWindow(Client* c, bool use_window)
 		).c_str()
 	);
 
-	if (GetHaste()) {
+	if ((IsClient() && CastToClient()->GetHaste()) || (!IsClient() && GetHaste())) {
 		c->Message(
 			Chat::White,
 			fmt::format(
 				"Haste: {}/{} (Item: {} + Spell: {} + Over: {})",
-				Strings::Commify(GetHaste()),
+				IsClient() ? Strings::Commify(CastToClient()->GetHaste()) : Strings::Commify(GetHaste()),
 				Strings::Commify(RuleI(Character, HasteCap)),
 				Strings::Commify(itembonuses.haste),
 				Strings::Commify(spellbonuses.haste + spellbonuses.hastetype2),
@@ -2913,7 +2925,7 @@ void Mob::ShowStats(Client* c)
 		}
 
 		// Body
-		auto bodytype_name = EQ::constants::GetBodyTypeName(t->GetBodyType());
+		auto bodytype_name = BodyType::GetName(t->GetBodyType());
 		c->Message(
 			Chat::White,
 			fmt::format(
@@ -3214,6 +3226,14 @@ void Mob::ShowStats(Client* c)
 				"Combat Stats | Offense: {} Mitigation Armor Class: {}",
 				offense(EQ::skills::SkillHandtoHand),
 				GetMitigationAC()
+			).c_str()
+		);
+
+		c->Message(
+			Chat::White,
+			fmt::format(
+				"Combat Stats | Haste: {}",
+				GetHaste()
 			).c_str()
 		);
 
@@ -3525,24 +3545,21 @@ void Mob::DoAnim(const int animation_id, int animation_speed, bool ackreq, eqFil
 		return;
 	}
 
-	auto outapp = new EQApplicationPacket(OP_Animation, sizeof(Animation_Struct));
-	auto *a  = (Animation_Struct *) outapp->pBuffer;
-
+	static EQApplicationPacket p(OP_Animation, sizeof(Animation_Struct));
+	auto a = (Animation_Struct*) p.pBuffer;
 	a->spawnid = GetID();
 	a->action  = animation_id;
 	a->speed   = animation_speed ? animation_speed : 10;
 
 	entity_list.QueueCloseClients(
 		this, /* Sender */
-		outapp, /* Packet */
+		&p, /* Packet */
 		false, /* Ignore Sender */
 		RuleI(Range, Anims),
 		0, /* Skip this mob */
 		ackreq, /* Packet ACK */
 		filter /* eqFilterType filter */
 	);
-
-	safe_delete(outapp);
 }
 
 void Mob::ShowBuffs(Client* c) {
@@ -4054,7 +4071,8 @@ uint8 Mob::GetDefaultGender(uint16 in_race, uint8 in_gender) {
 		in_race == Race::Human2 ||
 		in_race == Race::ElvenGhost ||
 		in_race == Race::HumanGhost ||
-		in_race == Race::Coldain2
+		in_race == Race::Coldain2 ||
+		in_race == Race::Akheva
 	) {
 		if (in_gender >= Gender::Neuter) { // Male default for PC Races
 			return Gender::Male;
@@ -4647,25 +4665,22 @@ bool Mob::CanThisClassDoubleAttack(void) const
 	}
 }
 
-bool Mob::CanThisClassTripleAttack() const
-{
-	if (!IsClient()) {
-		return false; // When they added the real triple attack skill, mobs lost the ability to triple
-	} else {
-		if (RuleB(Combat, ClassicTripleAttack)) {
-			return (
-				GetLevel() >= 60 &&
-				(
-					GetClass() == Class::Warrior ||
-					GetClass() == Class::Ranger ||
-					GetClass() == Class::Monk ||
-					GetClass() == Class::Berserker
-				)
-			);
-		} else {
-			return CastToClient()->HasSkill(EQ::skills::SkillTripleAttack);
-		}
+bool Mob::CanThisClassTripleAttack() const {
+	if (!IsOfClientBot()) {
+		return false; // Mobs lost the ability to triple attack when the real skill was added
 	}
+
+	if (RuleB(Combat, ClassicTripleAttack)) {
+		return GetLevel() >= 60 && (
+			GetClass() == Class::Warrior ||
+			GetClass() == Class::Ranger ||
+			GetClass() == Class::Monk ||
+			GetClass() == Class::Berserker
+		);
+	}
+
+	return IsClient() ? CastToClient()->HasSkill(EQ::skills::SkillTripleAttack)
+		: GetSkill(EQ::skills::SkillTripleAttack) > 0;
 }
 
 bool Mob::CanThisClassParry(void) const
@@ -4803,7 +4818,7 @@ bool Mob::HateSummon() {
 	if (IsCharmed())
 		return false;
 
-	int summon_level = GetSpecialAbility(SPECATK_SUMMON);
+	int summon_level = GetSpecialAbility(SpecialAbility::Summon);
 	if(summon_level == 1 || summon_level == 2) {
 		if(!GetTarget()) {
 			return false;
@@ -4814,19 +4829,19 @@ bool Mob::HateSummon() {
 	}
 
 	// validate hp
-	int hp_ratio = GetSpecialAbilityParam(SPECATK_SUMMON, 1);
+	int hp_ratio = GetSpecialAbilityParam(SpecialAbility::Summon, 1);
 	hp_ratio = hp_ratio > 0 ? hp_ratio : 97;
 	if(GetHPRatio() > static_cast<float>(hp_ratio)) {
 		return false;
 	}
 
 	// now validate the timer
-	int summon_timer_duration = GetSpecialAbilityParam(SPECATK_SUMMON, 0);
+	int summon_timer_duration = GetSpecialAbilityParam(SpecialAbility::Summon, 0);
 	summon_timer_duration = summon_timer_duration > 0 ? summon_timer_duration : 6000;
-	Timer *timer = GetSpecialAbilityTimer(SPECATK_SUMMON);
+	Timer *timer = GetSpecialAbilityTimer(SpecialAbility::Summon);
 	if (!timer)
 	{
-		StartSpecialAbilityTimer(SPECATK_SUMMON, summon_timer_duration);
+		StartSpecialAbilityTimer(SpecialAbility::Summon, summon_timer_duration);
 	} else {
 		if(!timer->Check())
 			return false;
@@ -4865,7 +4880,7 @@ bool Mob::HateSummon() {
 			} else {
 				bool target_is_client_pet = (
 					target->IsPet() &&
-					target->IsPetOwnerClient()
+					target->IsPetOwnerOfClientBot()
 				);
 				bool set_new_guard_spot = !(IsNPC() && target_is_client_pet);
 
@@ -5003,7 +5018,7 @@ void Mob::Say(const char *format, ...)
 	int16 distance = 200;
 
 	if (RuleB(Chat, QuestDialogueUsesDialogueWindow)) {
-		for (auto &e : entity_list.GetCloseMobList(talker, (distance * distance))) {
+		for (auto &e : talker->GetCloseMobList(distance)) {
 			Mob *mob = e.second;
 			if (!mob) {
 				continue;
@@ -5261,20 +5276,20 @@ void Mob::ExecWeaponProc(const EQ::ItemInstance* inst, uint16 spell_id, Mob* on,
 		return;
 	}
 
-	if (!IsValidSpell(spell_id) || on->GetSpecialAbility(NO_HARM_FROM_CLIENT)) {
+	if (!IsValidSpell(spell_id) || on->GetSpecialAbility(SpecialAbility::HarmFromClientImmunity)) {
 		//This is so 65535 doesn't get passed to the client message and to logs because it is not relavant information for debugging.
 		return;
 	}
 
-	if (IsBot() && on->GetSpecialAbility(IMMUNE_DAMAGE_BOT)) {
+	if (IsBot() && on->GetSpecialAbility(SpecialAbility::BotDamageImmunity)) {
 		return;
 	}
 
-	if (IsClient() && on->GetSpecialAbility(IMMUNE_DAMAGE_CLIENT)) {
+	if (IsClient() && on->GetSpecialAbility(SpecialAbility::ClientDamageImmunity)) {
 		return;
 	}
 
-	if (IsNPC() && on->GetSpecialAbility(IMMUNE_DAMAGE_NPC)) {
+	if (IsNPC() && on->GetSpecialAbility(SpecialAbility::NPCDamageImmunity)) {
 		return;
 	}
 
@@ -5312,14 +5327,7 @@ void Mob::ExecWeaponProc(const EQ::ItemInstance* inst, uint16 spell_id, Mob* on,
 		//It should be safe as we don't have any truly const EQ::ItemInstance floating around anywhere.
 		//So we'll live with it for now
 		if (parse->ItemHasQuestSub(const_cast<EQ::ItemInstance*>(inst), EVENT_WEAPON_PROC)) {
-			int i = parse->EventItem(
-				EVENT_WEAPON_PROC,
-				CastToClient(),
-				const_cast<EQ::ItemInstance*>(inst),
-				on,
-				"",
-				spell_id
-			);
+			int i = parse->EventItem(EVENT_WEAPON_PROC, CastToClient(), const_cast<EQ::ItemInstance*>(inst), on, "", spell_id);
 
 			if (i != 0) {
 				return;
@@ -5431,10 +5439,19 @@ int Mob::GetHaste()
 		h += spellbonuses.hastetype2 > 10 ? 10 : spellbonuses.hastetype2;
 
 	// 26+ no cap, 1-25 10
-	if (level > 25 || (IsClient() && RuleB(Character, IgnoreLevelBasedHasteCaps))) // 26+
+	if (
+		level > 25 ||
+		(
+			(IsNPC() && RuleB(NPC, NPCIgnoreLevelBasedHasteCaps)) ||
+			(IsBot() && RuleB(Bots, BotsIgnoreLevelBasedHasteCaps)) ||
+			(IsMerc() && RuleB(Mercs, MercsIgnoreLevelBasedHasteCaps))
+		)
+	) {
 		h += itembonuses.haste;
-	else // 1-25
+	}
+	else { // 1-25
 		h += itembonuses.haste > 10 ? 10 : itembonuses.haste;
+	}
 
 	// mobs are different!
 	Mob *owner = nullptr;
@@ -5446,23 +5463,36 @@ int Mob::GetHaste()
 		cap = 10 + level;
 		cap += std::max(0, owner->GetLevel() - 39) + std::max(0, owner->GetLevel() - 60);
 	} else {
-		cap = 150;
+		cap = (IsNPC() ? RuleI(NPC, NPCHasteCap) : IsBot() ? RuleI(Bots, BotsHasteCap) : IsMerc() ? RuleI(Mercs, MercsHasteCap) : 150);
 	}
 
 	if(h > cap)
 		h = cap;
 
 	// 51+ 25 (despite there being higher spells...), 1-50 10
-	if (level > 50 || (IsClient() && RuleB(Character, IgnoreLevelBasedHasteCaps))) { // 51+
-		cap = RuleI(Character, Hastev3Cap);
-		if (spellbonuses.hastetype3 > cap) {
-			h += cap;
-		} else {
-			h += spellbonuses.hastetype3;
+	if (
+		(IsNPC() && !RuleB(NPC, NPCIgnoreLevelBasedHasteCaps)) ||
+		(IsBot() && !RuleB(Bots, BotsIgnoreLevelBasedHasteCaps)) ||
+		(IsMerc() && !RuleB(Mercs, MercsIgnoreLevelBasedHasteCaps))
+	) {
+		if (level > 50) { // 51+
+			cap = (IsNPC() ? RuleI(NPC, NPCHastev3Cap) : IsBot() ? RuleI(Bots, BotsHastev3Cap) : IsMerc() ? RuleI(Mercs, MercsHastev3Cap) : RuleI(Character, Hastev3Cap));
+
+			if (spellbonuses.hastetype3 > cap) {
+				h += cap;
+			}
+			else {
+				h += spellbonuses.hastetype3;
+			}
 		}
-	} else { // 1-50
-		h += spellbonuses.hastetype3 > 10 ? 10 : spellbonuses.hastetype3;
+		else { // 1-50
+			h += spellbonuses.hastetype3 > 10 ? 10 : spellbonuses.hastetype3;
+		}
 	}
+	else {
+		h += spellbonuses.hastetype3;
+	}
+
 	h += extra_haste;	//GM granted haste.
 
 	return 100 + h;
@@ -5477,37 +5507,13 @@ void Mob::SetTarget(Mob *mob)
 	target = mob;
 	entity_list.UpdateHoTT(this);
 
-	const auto has_target_change_event = (
-		parse->HasQuestSub(GetNPCTypeID(), EVENT_TARGET_CHANGE) ||
-		parse->PlayerHasQuestSub(EVENT_TARGET_CHANGE) ||
-		parse->BotHasQuestSub(EVENT_TARGET_CHANGE)
-	);
-
 	if (IsClient() && CastToClient()->admin > AccountStatus::GMMgmt) {
 		DisplayInfo(mob);
 	}
 
-	if (has_target_change_event) {
-		std::vector<std::any> args;
+	std::vector<std::any> args = { mob };
 
-		args.emplace_back(mob);
-
-		if (IsNPC()) {
-			if (parse->HasQuestSub(GetNPCTypeID(), EVENT_TARGET_CHANGE)) {
-				parse->EventNPC(EVENT_TARGET_CHANGE, CastToNPC(), mob, "", 0, &args);
-			}
-		} else if (IsClient()) {
-			if (parse->PlayerHasQuestSub(EVENT_TARGET_CHANGE)) {
-				parse->EventPlayer(EVENT_TARGET_CHANGE, CastToClient(), "", 0, &args);
-			}
-
-			CastToClient()->SetBotPrecombat(false); // Any change in target will nullify this flag (target == mob checked above)
-		} else if (IsBot()) {
-			if (parse->BotHasQuestSub(EVENT_TARGET_CHANGE)) {
-				parse->EventBot(EVENT_TARGET_CHANGE, CastToBot(), mob, "", 0, &args);
-			}
-		}
-	}
+	parse->EventMob(EVENT_TARGET_CHANGE, this, mob, [&]() { return ""; }, 0, &args);
 
 	if (IsPet() && GetOwner() && GetOwner()->IsClient()) {
 		GetOwner()->CastToClient()->UpdateXTargetType(MyPetTarget, mob);
@@ -5680,22 +5686,10 @@ bool Mob::ClearEntityVariables()
 		return false;
 	}
 
-	if (
-		(IsBot() && parse->BotHasQuestSub(EVENT_ENTITY_VARIABLE_DELETE)) ||
-		(IsClient() && parse->PlayerHasQuestSub(EVENT_ENTITY_VARIABLE_DELETE)) ||
-		(IsNPC() && parse->HasQuestSub(GetNPCTypeID(), EVENT_ENTITY_VARIABLE_DELETE))
-	) {
-		for (const auto& e : m_EntityVariables) {
-			std::vector<std::any> args = { e.first, e.second };
+	for (const auto& e : m_EntityVariables) {
+		std::vector<std::any> args = { e.first, e.second };
 
-			if (IsBot()) {
-				parse->EventBot(EVENT_ENTITY_VARIABLE_DELETE, CastToBot(), nullptr, "", 0, &args);
-			} else if (IsClient()) {
-				parse->EventPlayer(EVENT_ENTITY_VARIABLE_DELETE, CastToClient(), "", 0, &args);
-			} else if (IsNPC()) {
-				parse->EventNPC(EVENT_ENTITY_VARIABLE_DELETE, CastToNPC(), nullptr, "", 0, &args);
-			}
-		}
+		parse->EventMob(EVENT_ENTITY_VARIABLE_DELETE, this, nullptr, [&]() { return ""; }, 0, &args);
 	}
 
 	m_EntityVariables.clear();
@@ -5713,23 +5707,10 @@ bool Mob::DeleteEntityVariable(std::string variable_name)
 		return false;
 	}
 
+	std::vector<std::any> args = { v->first, v->second };
+	parse->EventMob(EVENT_ENTITY_VARIABLE_DELETE, this, nullptr, [&]() { return ""; }, 0, &args);
+
 	m_EntityVariables.erase(v);
-
-	if (
-		(IsBot() && parse->BotHasQuestSub(EVENT_ENTITY_VARIABLE_DELETE)) ||
-		(IsClient() && parse->PlayerHasQuestSub(EVENT_ENTITY_VARIABLE_DELETE)) ||
-		(IsNPC() && parse->HasQuestSub(GetNPCTypeID(), EVENT_ENTITY_VARIABLE_DELETE))
-	) {
-		std::vector<std::any> args = { v->first, v->second };
-
-		if (IsBot()) {
-			parse->EventBot(EVENT_ENTITY_VARIABLE_DELETE, CastToBot(), nullptr, "", 0, &args);
-		} else if (IsClient()) {
-			parse->EventPlayer(EVENT_ENTITY_VARIABLE_DELETE, CastToClient(), "", 0, &args);
-		} else if (IsNPC()) {
-			parse->EventNPC(EVENT_ENTITY_VARIABLE_DELETE, CastToNPC(), nullptr, "", 0, &args);
-		}
-	}
 
 	return true;
 }
@@ -5777,32 +5758,16 @@ void Mob::SetEntityVariable(std::string variable_name, std::string variable_valu
 		return;
 	}
 
-	const QuestEventID event_id = (
-		!EntityVariableExists(variable_name) ?
-		EVENT_ENTITY_VARIABLE_SET :
-		EVENT_ENTITY_VARIABLE_UPDATE
-	);
+	std::vector<std::any> args;
 
-	if (
-		(IsBot() && parse->BotHasQuestSub(event_id)) ||
-		(IsClient() && parse->PlayerHasQuestSub(event_id)) ||
-		(IsNPC() && parse->HasQuestSub(GetNPCTypeID(), event_id))
-	) {
-		std::vector<std::any> args;
+	if (!EntityVariableExists(variable_name)) {
+		args = { variable_name, variable_value };
 
-		if (event_id != EVENT_ENTITY_VARIABLE_UPDATE) {
-			args = { variable_name, variable_value };
-		} else {
-			args = { variable_name, GetEntityVariable(variable_name), variable_value };
-		}
+		parse->EventMob(EVENT_ENTITY_VARIABLE_SET, this, nullptr, [&]() { return ""; }, 0, &args);
+	} else {
+		args = { variable_name, GetEntityVariable(variable_name), variable_value };
 
-		if (IsBot()) {
-			parse->EventBot(event_id, CastToBot(), nullptr, "", 0, &args);
-		} else if (IsClient()) {
-			parse->EventPlayer(event_id, CastToClient(), "", 0, &args);
-		} else if (IsNPC()) {
-			parse->EventNPC(event_id, CastToNPC(), nullptr, "", 0, &args);
-		}
+		parse->EventMob(EVENT_ENTITY_VARIABLE_UPDATE, this, nullptr, [&]() { return ""; }, 0, &args);
 	}
 
 	m_EntityVariables[variable_name] = variable_value;
@@ -6055,18 +6020,17 @@ int32 Mob::GetVulnerability(Mob *caster, uint32 spell_id, uint32 ticsremaining, 
 bool Mob::IsTargetedFocusEffect(int focus_type) {
 
 	switch (focus_type) {
-	case focusSpellVulnerability:
-	case focusFcSpellDamagePctIncomingPC:
-	case focusFcDamageAmtIncoming:
-	case focusFcSpellDamageAmtIncomingPC:
-	case focusFcCastSpellOnLand:
-	case focusFcHealAmtIncoming:
-	case focusFcHealPctCritIncoming:
-	case focusFcHealPctIncoming:
-		return true;
-	default:
-		return false;
-
+		case focusSpellVulnerability:
+		case focusFcSpellDamagePctIncomingPC:
+		case focusFcDamageAmtIncoming:
+		case focusFcSpellDamageAmtIncomingPC:
+		case focusFcCastSpellOnLand:
+		case focusFcHealAmtIncoming:
+		case focusFcHealPctCritIncoming:
+		case focusFcHealPctIncoming:
+			return true;
+		default:
+			return false;
 	}
 }
 
@@ -6140,15 +6104,13 @@ int32 Mob::GetPositionalDmgTakenAmt(Mob *attacker)
 
 void Mob::SetBottomRampageList()
 {
-	auto &mob_list = entity_list.GetCloseMobList(this);
-
-	for (auto &e : mob_list) {
+	for (auto &e : GetCloseMobList()) {
 		auto mob = e.second;
 		if (!mob) {
 			continue;
 		}
 
-		if (!mob->GetSpecialAbility(SPECATK_RAMPAGE)) {
+		if (!mob->GetSpecialAbility(SpecialAbility::Rampage)) {
 			continue;
 		}
 
@@ -6167,15 +6129,13 @@ void Mob::SetBottomRampageList()
 
 void Mob::SetTopRampageList()
 {
-	auto &mob_list = entity_list.GetCloseMobList(this);
-
-	for (auto &e : mob_list) {
+	for (auto &e : GetCloseMobList()) {
 		auto mob = e.second;
 		if (!mob) {
 			continue;
 		}
 
-		if (!mob->GetSpecialAbility(SPECATK_RAMPAGE)) {
+		if (!mob->GetSpecialAbility(SpecialAbility::Rampage)) {
 			continue;
 		}
 
@@ -7073,7 +7033,7 @@ bool Mob::IsControllableBoat() const {
 	);
 }
 
-void Mob::SetBodyType(bodyType new_body, bool overwrite_orig) {
+void Mob::SetBodyType(uint8 new_body, bool overwrite_orig) {
 	bool needs_spawn_packet = false;
 	if(bodytype == 11 || bodytype >= 65 || new_body == 11 || new_body >= 65) {
 		needs_spawn_packet = true;
@@ -7201,56 +7161,56 @@ void Mob::SlowMitigation(Mob* caster)
 EQ::skills::SkillType Mob::GetSkillByItemType(int ItemType)
 {
 	switch (ItemType) {
-	case EQ::item::ItemType1HSlash:
-		return EQ::skills::Skill1HSlashing;
-	case EQ::item::ItemType2HSlash:
-		return EQ::skills::Skill2HSlashing;
-	case EQ::item::ItemType1HPiercing:
-		return EQ::skills::Skill1HPiercing;
-	case EQ::item::ItemType1HBlunt:
-		return EQ::skills::Skill1HBlunt;
-	case EQ::item::ItemType2HBlunt:
-		return EQ::skills::Skill2HBlunt;
-	case EQ::item::ItemType2HPiercing:
-		if (IsClient() && CastToClient()->ClientVersion() < EQ::versions::ClientVersion::RoF2)
+		case EQ::item::ItemType1HSlash:
+			return EQ::skills::Skill1HSlashing;
+		case EQ::item::ItemType2HSlash:
+			return EQ::skills::Skill2HSlashing;
+		case EQ::item::ItemType1HPiercing:
 			return EQ::skills::Skill1HPiercing;
-		else
-			return EQ::skills::Skill2HPiercing;
-	case EQ::item::ItemTypeBow:
-		return EQ::skills::SkillArchery;
-	case EQ::item::ItemTypeLargeThrowing:
-	case EQ::item::ItemTypeSmallThrowing:
-		return EQ::skills::SkillThrowing;
-	case EQ::item::ItemTypeMartial:
-		return EQ::skills::SkillHandtoHand;
-	default:
-		return EQ::skills::SkillHandtoHand;
+		case EQ::item::ItemType1HBlunt:
+			return EQ::skills::Skill1HBlunt;
+		case EQ::item::ItemType2HBlunt:
+			return EQ::skills::Skill2HBlunt;
+		case EQ::item::ItemType2HPiercing:
+			if (IsClient() && CastToClient()->ClientVersion() < EQ::versions::ClientVersion::RoF2)
+				return EQ::skills::Skill1HPiercing;
+			else
+				return EQ::skills::Skill2HPiercing;
+		case EQ::item::ItemTypeBow:
+			return EQ::skills::SkillArchery;
+		case EQ::item::ItemTypeLargeThrowing:
+		case EQ::item::ItemTypeSmallThrowing:
+			return EQ::skills::SkillThrowing;
+		case EQ::item::ItemTypeMartial:
+			return EQ::skills::SkillHandtoHand;
+		default:
+			return EQ::skills::SkillHandtoHand;
 	}
  }
 
 uint8 Mob::GetItemTypeBySkill(EQ::skills::SkillType skill)
 {
 	switch (skill) {
-	case EQ::skills::SkillThrowing:
-		return EQ::item::ItemTypeSmallThrowing;
-	case EQ::skills::SkillArchery:
-		return EQ::item::ItemTypeArrow;
-	case EQ::skills::Skill1HSlashing:
-		return EQ::item::ItemType1HSlash;
-	case EQ::skills::Skill2HSlashing:
-		return EQ::item::ItemType2HSlash;
-	case EQ::skills::Skill1HPiercing:
-		return EQ::item::ItemType1HPiercing;
-	case EQ::skills::Skill2HPiercing: // watch for undesired client behavior
-		return EQ::item::ItemType2HPiercing;
-	case EQ::skills::Skill1HBlunt:
-		return EQ::item::ItemType1HBlunt;
-	case EQ::skills::Skill2HBlunt:
-		return EQ::item::ItemType2HBlunt;
-	case EQ::skills::SkillHandtoHand:
-		return EQ::item::ItemTypeMartial;
-	default:
-		return EQ::item::ItemTypeMartial;
+		case EQ::skills::SkillThrowing:
+			return EQ::item::ItemTypeSmallThrowing;
+		case EQ::skills::SkillArchery:
+			return EQ::item::ItemTypeArrow;
+		case EQ::skills::Skill1HSlashing:
+			return EQ::item::ItemType1HSlash;
+		case EQ::skills::Skill2HSlashing:
+			return EQ::item::ItemType2HSlash;
+		case EQ::skills::Skill1HPiercing:
+			return EQ::item::ItemType1HPiercing;
+		case EQ::skills::Skill2HPiercing: // watch for undesired client behavior
+			return EQ::item::ItemType2HPiercing;
+		case EQ::skills::Skill1HBlunt:
+			return EQ::item::ItemType1HBlunt;
+		case EQ::skills::Skill2HBlunt:
+			return EQ::item::ItemType2HBlunt;
+		case EQ::skills::SkillHandtoHand:
+			return EQ::item::ItemTypeMartial;
+		default:
+			return EQ::item::ItemTypeMartial;
 	}
  }
 
@@ -7258,7 +7218,6 @@ uint16 Mob::GetWeaponSpeedbyHand(uint16 hand) {
 
 	uint16 weapon_speed = 0;
 	switch (hand) {
-
 		case 13:
 			weapon_speed = attack_timer.GetDuration();
 			break;
@@ -7501,7 +7460,7 @@ bool Mob::HasSpellEffect(int effect_id)
 
 int Mob::GetSpecialAbility(int ability)
 {
-	if (ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if (ability >= SpecialAbility::Max || ability < 0) {
 		return 0;
 	}
 
@@ -7510,7 +7469,7 @@ int Mob::GetSpecialAbility(int ability)
 
 bool Mob::HasSpecialAbilities()
 {
-	for (int i = 0; i < MAX_SPECIAL_ATTACK; ++i) {
+	for (int i = 0; i < SpecialAbility::Max; ++i) {
 		if (GetSpecialAbility(i)) {
 			return true;
 		}
@@ -7520,7 +7479,7 @@ bool Mob::HasSpecialAbilities()
 }
 
 int Mob::GetSpecialAbilityParam(int ability, int param) {
-	if(param >= MAX_SPECIAL_ATTACK_PARAMS || param < 0 || ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if(param >= SpecialAbility::MaxParameters || param < 0 || ability >= SpecialAbility::Max || ability < 0) {
 		return 0;
 	}
 
@@ -7528,7 +7487,7 @@ int Mob::GetSpecialAbilityParam(int ability, int param) {
 }
 
 void Mob::SetSpecialAbility(int ability, int level) {
-	if(ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if(ability >= SpecialAbility::Max || ability < 0) {
 		return;
 	}
 
@@ -7536,7 +7495,7 @@ void Mob::SetSpecialAbility(int ability, int level) {
 }
 
 void Mob::SetSpecialAbilityParam(int ability, int param, int value) {
-	if(param >= MAX_SPECIAL_ATTACK_PARAMS || param < 0 || ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if(param >= SpecialAbility::MaxParameters || param < 0 || ability >= SpecialAbility::Max || ability < 0) {
 		return;
 	}
 
@@ -7544,7 +7503,7 @@ void Mob::SetSpecialAbilityParam(int ability, int param, int value) {
 }
 
 void Mob::StartSpecialAbilityTimer(int ability, uint32 time) {
-	if (ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if (ability >= SpecialAbility::Max || ability < 0) {
 		return;
 	}
 
@@ -7557,7 +7516,7 @@ void Mob::StartSpecialAbilityTimer(int ability, uint32 time) {
 }
 
 void Mob::StopSpecialAbilityTimer(int ability) {
-	if (ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if (ability >= SpecialAbility::Max || ability < 0) {
 		return;
 	}
 
@@ -7565,7 +7524,7 @@ void Mob::StopSpecialAbilityTimer(int ability) {
 }
 
 Timer *Mob::GetSpecialAbilityTimer(int ability) {
-	if (ability >= MAX_SPECIAL_ATTACK || ability < 0) {
+	if (ability >= SpecialAbility::Max || ability < 0) {
 		return nullptr;
 	}
 
@@ -7573,10 +7532,10 @@ Timer *Mob::GetSpecialAbilityTimer(int ability) {
 }
 
 void Mob::ClearSpecialAbilities() {
-	for(int a = 0; a < MAX_SPECIAL_ATTACK; ++a) {
+	for(int a = 0; a < SpecialAbility::Max; ++a) {
 		SpecialAbilities[a].level = 0;
 		safe_delete(SpecialAbilities[a].timer);
-		for(int p = 0; p < MAX_SPECIAL_ATTACK_PARAMS; ++p) {
+		for(int p = 0; p < SpecialAbility::MaxParameters; ++p) {
 			SpecialAbilities[a].params[p] = 0;
 		}
 	}
@@ -7599,12 +7558,12 @@ void Mob::ProcessSpecialAbilities(const std::string &str) {
 			SetSpecialAbility(ability_id, value);
 
 			switch (ability_id) {
-				case SPECATK_QUAD:
+				case SpecialAbility::QuadrupleAttack:
 					if (value > 0) {
-						SetSpecialAbility(SPECATK_TRIPLE, 1);
+						SetSpecialAbility(SpecialAbility::TripleAttack, 1);
 					}
 					break;
-				case DESTRUCTIBLE_OBJECT:
+				case SpecialAbility::DestructibleObject:
 					if (value == 0) {
 						SetDestructibleObject(false);
 					} else {
@@ -7616,7 +7575,7 @@ void Mob::ProcessSpecialAbilities(const std::string &str) {
 			}
 
 			for (size_t i = 2, param_id = 0; i < sub_sp.size(); ++i, ++param_id) {
-				if (param_id >= MAX_SPECIAL_ATTACK_PARAMS) {
+				if (param_id >= SpecialAbility::MaxParameters) {
 					break;
 				}
 
@@ -7755,28 +7714,26 @@ bool Mob::CanRaceEquipItem(uint32 item_id)
 
 void Mob::SendAddPlayerState(PlayerState new_state)
 {
-	auto app = new EQApplicationPacket(OP_PlayerStateAdd, sizeof(PlayerState_Struct));
-	auto ps = (PlayerState_Struct *)app->pBuffer;
+	static EQApplicationPacket p(OP_PlayerStateAdd, sizeof(PlayerState_Struct));
+	auto                       b = (PlayerState_Struct *) p.pBuffer;
 
-	ps->spawn_id = GetID();
-	ps->state = static_cast<uint32>(new_state);
+	b->spawn_id = GetID();
+	b->state    = static_cast<uint32>(new_state);
 
-	AddPlayerState(ps->state);
-	entity_list.QueueClients(nullptr, app);
-	safe_delete(app);
+	AddPlayerState(b->state);
+	entity_list.QueueClients(nullptr, &p);
 }
 
 void Mob::SendRemovePlayerState(PlayerState old_state)
 {
-	auto app = new EQApplicationPacket(OP_PlayerStateRemove, sizeof(PlayerState_Struct));
-	auto ps = (PlayerState_Struct *)app->pBuffer;
+	static EQApplicationPacket p(OP_PlayerStateRemove, sizeof(PlayerState_Struct));
+	auto                       b = (PlayerState_Struct *) p.pBuffer;
 
-	ps->spawn_id = GetID();
-	ps->state = static_cast<uint32>(old_state);
+	b->spawn_id = GetID();
+	b->state    = static_cast<uint32>(old_state);
 
-	RemovePlayerState(ps->state);
-	entity_list.QueueClients(nullptr, app);
-	safe_delete(app);
+	RemovePlayerState(b->state);
+	entity_list.QueueClients(nullptr, &p);
 }
 
 int32 Mob::GetMeleeMitigation() {
@@ -8578,5 +8535,242 @@ void Mob::SetExtraHaste(int haste, bool need_to_save)
 
 			CharacterDataRepository::UpdateOne(database, e);
 		}
+	}
+}
+
+bool Mob::IsCloseToBanker()
+{
+	for (auto &e: GetCloseMobList()) {
+		auto mob = e.second;
+		if (mob && mob->IsNPC() && mob->GetClass() == Class::Banker) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool Mob::HasBotAttackFlag(Mob* tar) {
+	if (!tar) {
+		return false;
+	}
+
+	std::vector<uint32> l = tar->GetBotAttackFlags();
+
+	for (uint32 e : l) {
+		if (IsBot() && e == CastToBot()->GetBotOwnerCharacterID()) {
+			return true;
+		}
+
+		if (IsClient() && e == CastToClient()->CharacterID()) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+const uint16 scan_close_mobs_timer_moving = 6000; // 6 seconds
+const uint16 scan_close_mobs_timer_idle = 60000; // 60 seconds
+
+// If the moving timer triggers, lets see if we are moving or idle to restart the appropriate dynamic timer
+void Mob::CheckScanCloseMobsMovingTimer()
+{
+	LogAIScanCloseDetail(
+		"Mob [{}] {}moving, scan timer [{}]",
+		GetCleanName(),
+		IsMoving() ? "" : "NOT ",
+		m_scan_close_mobs_timer.GetRemainingTime()
+	);
+
+	// If the mob is still moving, restart the moving timer
+	if (moving) {
+		if (m_scan_close_mobs_timer.GetRemainingTime() > scan_close_mobs_timer_moving) {
+			LogAIScanCloseDetail("Mob [{}] Restarting with moving timer", GetCleanName());
+			m_scan_close_mobs_timer.Disable();
+			m_scan_close_mobs_timer.Start(scan_close_mobs_timer_moving);
+			m_scan_close_mobs_timer.Trigger();
+		}
+	}
+		// If the mob is not moving, restart the idle timer
+	else if (m_scan_close_mobs_timer.GetDuration() == scan_close_mobs_timer_moving) {
+		LogAIScanCloseDetail("Mob [{}] Restarting with idle timer", GetCleanName());
+		m_scan_close_mobs_timer.Disable();
+		m_scan_close_mobs_timer.Start(scan_close_mobs_timer_idle);
+	}
+}
+
+std::unordered_map<uint16, Mob*>& Mob::GetCloseMobList(float distance)
+{
+	return entity_list.GetCloseMobList(this, distance);
+}
+
+void Mob::ClearDataBucketCache()
+{
+	if (IsOfClientBot()) {
+		uint64                   id = 0;
+		DataBucketLoadType::Type t{};
+		if (IsBot()) {
+			id = CastToBot()->GetBotID();
+			t  = DataBucketLoadType::Bot;
+		}
+		else if (IsClient()) {
+			id = CastToClient()->CharacterID();
+			t  = DataBucketLoadType::Client;
+		}
+
+		DataBucket::DeleteFromCache(id, t);
+	}
+}
+
+bool Mob::IsInGroupOrRaid(Mob* other, bool same_raid_group) {
+	if (!other || !IsOfClientBotMerc() || !other->IsOfClientBotMerc()) {
+		return false;
+	}
+
+	if (this == other) {
+		return true;
+	}
+
+	Raid* raid = IsBot() ? CastToBot()->GetStoredRaid() : (IsRaidGrouped() ? GetRaid() : nullptr);
+
+	if (raid) {
+		if (!other->IsRaidGrouped()) {
+			return false;
+		}
+
+		Raid* other_raid = other->IsBot() ? other->CastToBot()->GetStoredRaid() : other->GetRaid();
+
+		if (!other_raid) {
+			return false;
+		}
+
+		auto raid_group = raid->GetGroup(GetCleanName());
+		auto other_raid_group = other_raid->GetGroup(other->GetCleanName());
+
+		if (
+			raid_group == RAID_GROUPLESS ||
+			other_raid_group == RAID_GROUPLESS ||
+			(same_raid_group && raid_group != other_raid_group)
+		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	Group* group = GetGroup();
+	Group* other_group = other->GetGroup();
+
+	return group && group == other_group;
+}
+
+bool Mob::DoLosChecks(Mob* other) {
+	if (!CheckLosFN(other) || !CheckWaterLoS(other)) {
+		if (CheckLosCheatExempt(other)) {
+			return true;
+		}
+
+		return false;
+	}
+
+	if (!CheckLosCheat(other)) {
+		return false;
+	}
+
+	return true;
+}
+
+bool Mob::CheckLosCheat(Mob* other) {
+	if (RuleB(Map, CheckForLoSCheat)) {
+		for (auto itr : entity_list.GetDoorsList()) {
+			Doors* d = itr.second;
+
+			if (
+				!d->IsDoorOpen() &&
+				(
+					d->GetKeyItem() ||
+					d->GetLockpick() ||
+					d->IsDoorOpen() ||
+					d->IsDoorBlacklisted() ||
+					d->GetNoKeyring() != 0 ||
+					d->GetDoorParam() > 0
+				)
+			) {
+				// If the door is a trigger door, check if the trigger door is open
+				if (d->GetTriggerDoorID() > 0) {
+					auto td = entity_list.GetDoorsByDoorID(d->GetTriggerDoorID());
+
+					if (td) {
+						if (Strings::RemoveNumbers(d->GetDoorName()) != Strings::RemoveNumbers(td->GetDoorName())) {
+							continue;
+						}
+					}
+				}
+
+				if (DistanceNoZ(GetPosition(), d->GetPosition()) <= 50) {
+					auto who_to_door = DistanceNoZ(GetPosition(), d->GetPosition());
+					auto other_to_door = DistanceNoZ(other->GetPosition(), d->GetPosition());
+					auto who_to_other = DistanceNoZ(GetPosition(), other->GetPosition());
+					auto distance_difference = who_to_other - (who_to_door + other_to_door);
+
+					if (distance_difference >= (-1 * RuleR(Maps, RangeCheckForLoSCheat)) && distance_difference <= RuleR(Maps, RangeCheckForLoSCheat)) {
+						return false;
+					}
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
+bool Mob::CheckLosCheatExempt(Mob* other)
+{
+	if (RuleB(Map, EnableLoSCheatExemptions)) {
+		/* This is an exmaple of how to configure exemptions for LoS checks.
+		glm::vec4 exempt_check_who;
+		glm::vec4 exempt_check_other;
+
+		switch (zone->GetZoneID()) {
+			case POEARTHB:
+				exempt_check_who.x = 2051; exempt_check_who.y = 407; exempt_check_who.z = -219; //Middle of councilman spawns
+				//exempt_check_other.x = 1455; exempt_check_other.y = 415; exempt_check_other.z = -242;
+				//check to be sure the player and the target are outside of the councilman area
+				//if the player is inside the cove they cannot be higher than the ceiling (no exploiting from uptop)
+				if (GetZ() <= -171 && other->GetZ() <= -171 && DistanceNoZ(other->GetPosition(), exempt_check_who) <= 800 && DistanceNoZ(GetPosition(), exempt_check_who) <= 800) {
+					return true;
+				}
+			default:
+				return false;
+		}
+		*/
+	}
+
+	return false;
+}
+
+bool Mob::IsGuildmaster() const {
+	switch (GetClass()) {
+		case Class::WarriorGM:
+		case Class::ClericGM:
+		case Class::PaladinGM:
+		case Class::RangerGM:
+		case Class::ShadowKnightGM:
+		case Class::DruidGM:
+		case Class::MonkGM:
+		case Class::BardGM:
+		case Class::RogueGM:
+		case Class::ShamanGM:
+		case Class::NecromancerGM:
+		case Class::WizardGM:
+		case Class::MagicianGM:
+		case Class::EnchanterGM:
+		case Class::BeastlordGM:
+		case Class::BerserkerGM:
+			return true;
+		default:
+			return false;
 	}
 }

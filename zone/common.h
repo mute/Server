@@ -4,6 +4,8 @@
 #include "../common/types.h"
 #include "../common/spdat.h"
 
+#include <cereal/cereal.hpp>
+
 #define	HIGHEST_RESIST 9 //Max resist type value
 #define MAX_SPELL_PROJECTILE 10 //Max amount of spell projectiles that can be active by a single mob.
 
@@ -272,6 +274,46 @@ struct Buffs_Struct {
 	bool	persistant_buff;
 	bool	client; //True if the caster is a client
 	bool	UpdateClient;
+
+	// cereal
+	template<class Archive>
+	void serialize(Archive &ar)
+	{
+
+		std::string caster_name_str(caster_name);
+		if (Archive::is_saving::value) {
+			caster_name_str = std::string(caster_name);
+		}
+
+		ar(
+			CEREAL_NVP(spellid),
+			CEREAL_NVP(casterlevel),
+			CEREAL_NVP(casterid),
+			CEREAL_NVP(caster_name_str),
+			CEREAL_NVP(ticsremaining),
+			CEREAL_NVP(counters),
+			CEREAL_NVP(hit_number),
+			CEREAL_NVP(melee_rune),
+			CEREAL_NVP(magic_rune),
+			CEREAL_NVP(dot_rune),
+			CEREAL_NVP(caston_x),
+			CEREAL_NVP(caston_y),
+			CEREAL_NVP(caston_z),
+			CEREAL_NVP(ExtraDIChance),
+			CEREAL_NVP(RootBreakChance),
+			CEREAL_NVP(instrument_mod),
+			CEREAL_NVP(virus_spread_time),
+			CEREAL_NVP(persistant_buff),
+			CEREAL_NVP(client),
+			CEREAL_NVP(UpdateClient)
+		);
+
+		// Copy back into caster_name after deserialization
+		if (Archive::is_loading::value) {
+			strncpy(caster_name, caster_name_str.c_str(), sizeof(caster_name));
+			caster_name[sizeof(caster_name) - 1] = '\0'; // Ensure null termination
+		}
+	}
 };
 
 struct StatBonuses {
@@ -336,6 +378,7 @@ struct StatBonuses {
 	int32	hastetype2;
 	int32	hastetype3;
 	int32	inhibitmelee;
+	int32	increase_archery;
 	float	AggroRange;							// when calculate just replace original value with this
 	float	AssistRange;
 	int32	skillmod[EQ::skills::HIGHEST_SKILL + 1];
@@ -632,8 +675,8 @@ namespace SBIndex {
 	constexpr uint16 SKILLATK_PROC_SPELL_ID                 = 0; // SPA 288
 	constexpr uint16 SKILLATK_PROC_CHANCE                   = 1; // SPA 288
 	constexpr uint16 SKILLATK_PROC_SKILL                    = 2; // SPA 288
-	constexpr uint16 SLAYUNDEAD_RATE_MOD                    = 0; // SPA 219
-	constexpr uint16 SLAYUNDEAD_DMG_MOD                     = 1; // SPA 219
+	constexpr uint16 SLAYUNDEAD_DMG_MOD                     = 0; // SPA 219
+	constexpr uint16 SLAYUNDEAD_RATE_MOD                    = 1; // SPA 219
 	constexpr uint16 DOUBLE_RIPOSTE_CHANCE                  = 0; // SPA 223
 	constexpr uint16 DOUBLE_RIPOSTE_SKILL_ATK_CHANCE        = 1; // SPA 223
 	constexpr uint16 DOUBLE_RIPOSTE_SKILL                   = 2; // SPA 223
@@ -859,13 +902,6 @@ struct DamageHitInfo {
 	int tohit;
 	int hand;
 	EQ::skills::SkillType skill;
-};
-
-struct ExpeditionInvite
-{
-	uint32_t    expedition_id;
-	std::string inviter_name;
-	std::string swap_remove_name;
 };
 
 struct DataBucketCache

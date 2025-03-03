@@ -462,10 +462,6 @@ bool ZoneDatabase::LoadTraps(const std::string& zone_short_name, int16 instance_
 		)
 	);
 
-	if (l.empty()) {
-		return false;
-	}
-
 	for (const auto& e : l) {
 		if (e.group_) {
 			if (entity_list.IsTrapGroupSpawned(e.id, e.group_)) {
@@ -521,7 +517,7 @@ void Trap::CreateHiddenTrigger()
 	make_npc->current_hp = 100000;
 	strcpy(make_npc->name, "a_trap");
 	make_npc->runspeed = 0.0f;
-	make_npc->bodytype = BT_Special;
+	make_npc->bodytype = BodyType::Special;
 	make_npc->race = 127;
 	make_npc->gender = Gender::Male;
 	make_npc->loottable_id = 0;

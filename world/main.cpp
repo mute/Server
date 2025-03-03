@@ -46,6 +46,7 @@
 #include "client.h"
 #include "worlddb.h"
 #include "wguild_mgr.h"
+#include "../common/evolving_items.h"
 
 #ifdef _WINDOWS
 #include <process.h>
@@ -75,10 +76,10 @@
 #include "web_interface.h"
 #include "console.h"
 #include "dynamic_zone_manager.h"
-#include "expedition_database.h"
 
 #include "world_server_cli.h"
 #include "../common/content/world_content_service.h"
+#include "../common/repositories/character_expedition_lockouts_repository.h"
 #include "../common/repositories/character_task_timers_repository.h"
 #include "../common/zone_store.h"
 #include "world_event_scheduler.h"
@@ -88,6 +89,7 @@
 #include "../common/events/player_event_logs.h"
 #include "../common/skill_caps.h"
 #include "../common/repositories/character_parcels_repository.h"
+#include "../common/ip_util.h"
 
 SkillCaps           skill_caps;
 ZoneStore           zone_store;
@@ -111,6 +113,7 @@ WorldContentService content_service;
 WebInterfaceList    web_interface;
 PathManager         path;
 PlayerEventLogs     player_event_logs;
+EvolvingItemsManager evolving_items_manager;
 
 void CatchSignal(int sig_num);
 
@@ -185,6 +188,11 @@ int main(int argc, char **argv)
 	LogInfo("Loading launcher list");
 	launcher_list.LoadList();
 	zoneserver_list.Init();
+
+	if (IpUtil::IsPortInUse(Config->WorldIP, Config->WorldTCPPort)) {
+		LogError("World port [{}] already in use", Config->WorldTCPPort);
+		return 1;
+	}
 
 	std::unique_ptr<EQ::Net::ConsoleServer> console;
 	if (Config->TelnetEnabled) {
@@ -374,7 +382,9 @@ int main(int argc, char **argv)
 	);
 
 	Timer player_event_process_timer(1000);
-	player_event_logs.SetDatabase(&database)->Init();
+	if (player_event_logs.LoadDatabaseConnection()) {
+		player_event_logs.Init();
+	}
 
 	auto loop_fn = [&](EQ::Timer* t) {
 		Timer::SetCurrentTime();
@@ -439,13 +449,13 @@ int main(int argc, char **argv)
 		}
 
 		if (player_event_process_timer.Check()) {
-			player_event_logs.Process();
+			std::jthread event_thread(&PlayerEventLogs::Process, &player_event_logs);
 		}
 
 		if (PurgeInstanceTimer.Check()) {
 			database.PurgeExpiredInstances();
 			database.PurgeAllDeletedDataBuckets();
-			ExpeditionDatabase::PurgeExpiredCharacterLockouts();
+			CharacterExpeditionLockoutsRepository::DeleteWhere(database, "expire_time <= NOW()");
 			CharacterTaskTimersRepository::DeleteWhere(database, "expire_time <= NOW()");
 		}
 

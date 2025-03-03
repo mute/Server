@@ -170,7 +170,7 @@ public:
 	bool SetAccountStatus(const std::string& account_name, int16 status);
 	bool SetLocalPassword(uint32 account_id, const std::string& password);
 	bool UpdateLiveChar(const std::string& name, uint32 account_id);
-	int16 CheckStatus(uint32 account_id);
+	int16 GetAccountStatus(uint32 account_id);
 	void SetAccountCRCField(uint32 account_id, const std::string& field_name, uint64 checksum);
 	uint32 CheckLogin(const std::string& name, const std::string& password, const std::string& loginserver, int16* status = 0);
 	uint32 CreateAccount(
@@ -244,6 +244,8 @@ public:
 
 	void PurgeAllDeletedDataBuckets();
 	void ClearGuildOnlineStatus();
+	void ClearTraderDetails();
+	void ClearBuyerDetails();
 
 
 	/* Database Variables */
@@ -271,6 +273,8 @@ public:
 	void PurgeCharacterParcels();
 	void Encode(std::string &in);
 	void Decode(std::string &in);
+
+	uint64_t GetNextTableId(const std::string& table_name);
 
 private:
 	Mutex           Mvarcache;

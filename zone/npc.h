@@ -222,7 +222,7 @@ public:
 	void RemoveLootCash();
 	void QueryLoot(Client *to, bool is_pet_query = false);
 	bool HasItem(uint32 item_id);
-	uint16 CountItem(uint32 item_id);
+	uint32 CountItem(uint32 item_id);
 	uint32 GetLootItemIDBySlot(uint16 loot_slot);
 	uint16 GetFirstLootSlotByItemID(uint32 item_id);
 	std::vector<int> GetLootList();
@@ -248,6 +248,7 @@ public:
 
 	uint16 GetWaypointMax() const { return wp_m; }
 	int32 GetGrid() const { return grid; }
+	Spawn2* GetSpawn() { return respawn2 ? respawn2 : nullptr; }
 	uint32 GetSpawnGroupId() const { return spawn_group_id; }
 	uint32 GetSpawnPointID() const;
 
@@ -268,6 +269,7 @@ public:
 	inline void	MerchantOpenShop() { merchant_open = true; }
 	inline void	MerchantCloseShop() { merchant_open = false; }
 	inline bool	IsMerchantOpen() { return merchant_open; }
+	inline uint8 GetGreedPercent() { return NPCTypedata->greed; }
 	inline bool GetParcelMerchant() { return NPCTypedata->is_parcel_merchant; }
 	void	Depop(bool start_spawn_timer = false);
 	void	Stun(int duration);
@@ -312,7 +314,7 @@ public:
 	float GetSlowMitigation() const { return slow_mitigation; }
 	float	GetAttackSpeed() const {return attack_speed;}
 	int		GetAttackDelay() const {return attack_delay;}
-	bool	IsAnimal() const { return(bodytype == BT_Animal); }
+	bool	IsAnimal() const { return(bodytype == BodyType::Animal); }
 	uint16	GetPetSpellID() const {return pet_spell_id;}
 	void	SetPetSpellID(uint16 amt) {pet_spell_id = amt;}
 	uint32	GetMaxDamage(uint8 tlevel);
@@ -481,7 +483,8 @@ public:
 	NPC_Emote_Struct* GetNPCEmote(uint32 emote_id, uint8 event_);
 	void DoNPCEmote(uint8 event_, uint32 emote_id, Mob* t = nullptr);
 	bool CanTalk();
-	void DoQuestPause(Mob *other);
+	void DoQuestPause(Mob* m);
+	bool FacesTarget();
 
 	inline void SetSpellScale(float amt)		{ spellscale = amt; }
 	inline float GetSpellScale()				{ return spellscale; }
@@ -556,6 +559,55 @@ public:
 
 	bool CanPathTo(float x, float y, float z);
 
+	void DoNpcToNpcAggroScan();
+
+	// hand-ins
+	bool CanPetTakeItem(const EQ::ItemInstance *inst);
+
+	struct HandinEntry {
+		std::string      item_id            = "0";
+		uint32           count              = 0;
+		EQ::ItemInstance *item              = nullptr;
+		bool             is_multiquest_item = false; // state
+	};
+
+	struct HandinMoney {
+		uint32 platinum = 0;
+		uint32 gold     = 0;
+		uint32 silver   = 0;
+		uint32 copper   = 0;
+	};
+
+	struct Handin {
+		std::vector<HandinEntry> original_items = {}; // this is what the player originally handed in, never modified
+		std::vector<HandinEntry> items          = {}; // items can be removed from this set as successful handins are made
+		HandinMoney              original_money = {}; // this is what the player originally handed in, never modified
+		HandinMoney              money          = {}; // money can be removed from this set as successful handins are made
+	};
+
+	// NPC Hand-in
+	bool IsMultiQuestEnabled() { return m_multiquest_enabled; }
+	void MultiQuestEnable() { m_multiquest_enabled = true; }
+	bool IsGuildmasterForClient(Client *c);
+	bool CheckHandin(
+		Client *c,
+		std::map<std::string, uint32> handin,
+		std::map<std::string, uint32> required,
+		std::vector<EQ::ItemInstance *> items
+	);
+	Handin ReturnHandinItems(Client *c);
+	void ResetHandin();
+	void ResetMultiQuest();
+	bool HasProcessedHandinReturn() { return m_has_processed_handin_return; }
+	bool HandinStarted() { return m_handin_started; }
+
+	// zone state save
+	inline void SetQueuedToCorpse() { m_queued_for_corpse = true; }
+	inline bool IsQueuedForCorpse() { return m_queued_for_corpse; }
+	inline uint32_t SetCorpseDecayTime(uint32_t decay_time) { return m_corpse_decay_time = decay_time; }
+	inline void SetResumedFromZoneSuspend(bool state = true) { m_resumed_from_zone_suspend = state; }
+	inline bool IsResumedFromZoneSuspend() { return m_resumed_from_zone_suspend; }
+
 protected:
 
 	void HandleRoambox();
@@ -576,6 +628,18 @@ protected:
 	uint32    m_loot_gold;
 	uint32    m_loot_platinum;
 	LootItems m_loot_items;
+
+	// zone state
+	bool     m_resumed_from_zone_suspend  = false;
+	bool     m_queued_for_corpse          = false; // this is to check for corpse creation on zone state restore
+	uint32_t m_corpse_decay_time          = 0; // decay time set on zone state restore
+	Timer    m_corpse_queue_timer         = {}; // this is to check for corpse creation on zone state restore
+	Timer    m_corpse_queue_shutoff_timer = {};
+
+	// this is a 30-second timer that protects a NPC from having double assignment of loot
+	// this is to prevent a player from killing a NPC and then zoning out and back in to get loot again
+	// if loot was to be assigned via script again, this protects double assignment for 30 seconds
+	Timer m_resumed_from_zone_suspend_shutoff_timer = {};
 
 	std::list<NpcFactionEntriesRepository::NpcFactionEntries> faction_list;
 
@@ -697,6 +761,17 @@ protected:
 	bool raid_target;
 	bool ignore_despawn; //NPCs with this set to 1 will ignore the despawn value in spawngroup
 
+	// NPC Hand-in
+	bool m_multiquest_enabled          = false;
+	bool m_handin_started              = false;
+	bool m_has_processed_handin_return = false;
+
+	// this is the working handin data from the player
+	// items can be decremented from this as each successful
+	// check is ran in scripts, the remainder is what is returned
+	Handin m_hand_in = {};
+public:
+	const Handin GetHandin() { return m_hand_in; }
 
 private:
 	uint32              m_loottable_id;

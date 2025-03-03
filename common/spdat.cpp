@@ -93,7 +93,14 @@ bool IsTargetableAESpell(uint16 spell_id)
 		return false;
 	}
 
-	return spells[spell_id].target_type == ST_AETarget;
+	return (
+		spells[spell_id].target_type == ST_AETarget ||
+		spells[spell_id].target_type == ST_TargetAETap ||
+		spells[spell_id].target_type == ST_AETargetHateList ||
+		spells[spell_id].target_type == ST_TargetAENoPlayersPets ||
+		spells[spell_id].target_type == ST_UndeadAE ||
+		spells[spell_id].target_type == ST_SummonedAE
+	);
 }
 
 bool IsSacrificeSpell(uint16 spell_id)
@@ -125,9 +132,14 @@ bool IsMesmerizeSpell(uint16 spell_id)
 	return IsEffectInSpell(spell_id, SE_Mez);
 }
 
+bool SpellBreaksMez(uint16 spell_id)
+{
+	return (IsValidSpell(spell_id) && IsDetrimentalSpell(spell_id) && IsAnyDamageSpell(spell_id));
+}
+
 bool IsStunSpell(uint16 spell_id)
 {
-	return IsEffectInSpell(spell_id, SE_Stun);
+	return (IsValidSpell(spell_id) && IsEffectInSpell(spell_id, SE_Stun) || IsEffectInSpell(spell_id, SE_SpinTarget));
 }
 
 bool IsSummonSpell(uint16 spell_id)
@@ -154,6 +166,10 @@ bool IsSummonSpell(uint16 spell_id)
 
 bool IsDamageSpell(uint16 spell_id)
 {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
 	if (IsLifetapSpell(spell_id)) {
 		return false;
 	}
@@ -162,6 +178,32 @@ bool IsDamageSpell(uint16 spell_id)
 
 	for (int i = 0; i < EFFECT_COUNT; i++) {
 		const auto effect_id = spell.effect_id[i];
+		if (
+			spell.base_value[i] < 0 &&
+			(effect_id == SE_CurrentHPOnce || effect_id == SE_CurrentHP)
+		) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool IsAnyDamageSpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (IsLifetapSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		const auto effect_id = spell.effect_id[i];
+
 		if (
 			spell.base_value[i] < 0 &&
 			(
@@ -179,6 +221,35 @@ bool IsDamageSpell(uint16 spell_id)
 	return false;
 }
 
+bool IsDamageOverTimeSpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (IsLifetapSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	if (spell.good_effect || !spell.buff_duration_formula) {
+		return false;
+	}
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		const auto effect_id = spell.effect_id[i];
+		if (
+			spell.base_value[i] < 0 &&
+			effect_id == SE_CurrentHP &&
+			spell.buff_duration > 1
+		) {
+			return true;
+		}
+	}
+
+	return false;
+}
 
 bool IsFearSpell(uint16 spell_id)
 {
@@ -409,7 +480,8 @@ bool IsSummonPetSpell(uint16 spell_id)
 	return (
 		IsEffectInSpell(spell_id, SE_SummonPet) ||
 		IsEffectInSpell(spell_id, SE_SummonBSTPet) ||
-		IsEffectInSpell(spell_id, SE_Familiar)
+		IsEffectInSpell(spell_id, SE_Familiar) ||
+		IsEffectInSpell(spell_id, SE_NecPet)
 	);
 }
 
@@ -429,6 +501,16 @@ bool IsSummonPCSpell(uint16 spell_id)
 bool IsCharmSpell(uint16 spell_id)
 {
 	return IsEffectInSpell(spell_id, SE_Charm);
+}
+
+bool IsResurrectionSicknessSpell(uint16 spell_id) {
+	return (
+		spell_id == SPELL_RESURRECTION_SICKNESS ||
+		spell_id == SPELL_RESURRECTION_SICKNESS2 ||
+		spell_id == SPELL_RESURRECTION_SICKNESS3 ||
+		spell_id == SPELL_RESURRECTION_SICKNESS4 ||
+		spell_id == SPELL_REVIVAL_SICKNESS
+	);
 }
 
 bool IsBlindSpell(uint16 spell_id)
@@ -550,8 +632,7 @@ bool IsPBAENukeSpell(uint16 spell_id)
 
 	if (
 		IsPureNukeSpell(spell_id) &&
-		spell.aoe_range > 0 &&
-		spell.target_type == ST_AECaster
+		!IsTargetRequiredForSpell(spell_id)
 	) {
 		return true;
 	}
@@ -572,6 +653,122 @@ bool IsAERainNukeSpell(uint16 spell_id)
 		spell.aoe_range > 0 &&
 		spell.aoe_duration > 1000
 	) {
+		return true;
+	}
+
+	return false;
+}
+
+bool IsAnyNukeOrStunSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (IsSelfConversionSpell(spell_id) || IsEscapeSpell(spell_id)) {
+		return false;
+	}
+
+	if (
+		IsPBAENukeSpell(spell_id) ||
+		IsAERainNukeSpell(spell_id) ||
+		IsPureNukeSpell(spell_id) ||
+		IsStunSpell(spell_id) ||
+		(IsDamageSpell(spell_id) && !IsDamageOverTimeSpell(spell_id))
+	) {
+		return true;
+	}
+
+	return false;
+}
+
+bool IsAnyAESpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
+		IsTargetableAESpell(spell_id) ||
+		IsAESpell(spell_id) ||
+		IsPBAESpell(spell_id) ||
+		IsAEDurationSpell(spell_id) ||
+		IsAERainNukeSpell(spell_id) ||
+		IsAERainSpell(spell_id) ||
+		IsPBAENukeSpell(spell_id)
+	);
+}
+
+bool IsAESpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	switch (spells[spell_id].target_type) {
+		case ST_TargetOptional:
+		case ST_GroupTeleport :
+		case ST_Target:
+		case ST_Self:
+		case ST_Animal:
+		case ST_Undead:
+		case ST_Summoned:
+		case ST_Tap:
+		case ST_Pet:
+		case ST_Corpse:
+		case ST_Plant:
+		case ST_Giant:
+		case ST_Dragon:
+		case ST_LDoNChest_Cursed:
+		case ST_Muramite:
+		case ST_SummonedPet:
+		case ST_GroupNoPets:
+		case ST_Group:
+		case ST_GroupClientAndPet:
+		case ST_TargetsTarget:
+		case ST_PetMaster:
+			return false;
+		default:
+			break;
+	}
+
+	if (
+		spells[spell_id].aoe_range > 0
+		) {
+		return true;
+	}
+
+	return false;
+}
+
+bool IsPBAESpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	if (
+		spell.aoe_range > 0 &&
+		!IsTargetRequiredForSpell(spell_id)
+	) {
+		return true;
+	}
+
+	return false;
+}
+
+bool IsAERainSpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	if (
+		spell.aoe_range > 0 &&
+		spell.aoe_duration > 1000
+		) {
 		return true;
 	}
 
@@ -1255,45 +1452,45 @@ bool IsCompleteHealSpell(uint16 spell_id)
 	}
 
 	return false;
+
 }
 
-bool IsFastHealSpell(uint16 spell_id)
-{
-	spell_id = (
-		IsEffectInSpell(spell_id, SE_CurrentHP) ?
-		spell_id :
-		GetSpellTriggerSpellID(spell_id, SE_CurrentHP)
-	);
+bool IsFastHealSpell(uint16 spell_id) {
+    spell_id = (
+        IsEffectInSpell(spell_id, SE_CurrentHP) ?
+        spell_id :
+        GetSpellTriggerSpellID(spell_id, SE_CurrentHP)
+    );
 
-	if (!spell_id) {
-		spell_id = (
-			IsEffectInSpell(spell_id, SE_CurrentHPOnce) ?
-			spell_id :
-			GetSpellTriggerSpellID(spell_id, SE_CurrentHPOnce)
-		);
-	}
+    if (!spell_id) {
+        spell_id = (
+            IsEffectInSpell(spell_id, SE_CurrentHPOnce) ?
+            spell_id :
+            GetSpellTriggerSpellID(spell_id, SE_CurrentHPOnce)
+        );
+    }
 
-	if (spell_id) {
-		if (
-			spells[spell_id].cast_time <= MAX_FAST_HEAL_CASTING_TIME &&
-			spells[spell_id].good_effect &&
-			!IsGroupSpell(spell_id)
-		) {
-			for (int i = 0; i < EFFECT_COUNT; i++) {
-				if (
-					spells[spell_id].base_value[i] > 0 &&
-					(
-						spells[spell_id].effect_id[i] == SE_CurrentHP ||
-						spells[spell_id].effect_id[i] == SE_CurrentHPOnce
-					)
-				) {
-					return true;
-				}
-			}
-		}
-	}
+    if (spell_id && IsValidSpell(spell_id)) {
+        if (
+            spells[spell_id].cast_time <= MAX_FAST_HEAL_CASTING_TIME &&
+            spells[spell_id].good_effect &&
+            !IsGroupSpell(spell_id)
+        ) {
+            for (int i = 0; i < EFFECT_COUNT; i++) {
+                if (
+                    spells[spell_id].base_value[i] > 0 &&
+                    (
+                        spells[spell_id].effect_id[i] == SE_CurrentHP ||
+                        spells[spell_id].effect_id[i] == SE_CurrentHPOnce
+                    )
+                ) {
+                    return true;
+                }
+            }
+        }
+    }
 
-	return false;
+    return false;
 }
 
 bool IsVeryFastHealSpell(uint16 spell_id)
@@ -1376,6 +1573,47 @@ bool IsRegularSingleTargetHealSpell(uint16 spell_id)
 	return false;
 }
 
+bool IsRegularPetHealSpell(uint16 spell_id)
+{
+	spell_id = (
+		IsEffectInSpell(spell_id, SE_CurrentHP) ?
+		spell_id :
+		GetSpellTriggerSpellID(spell_id, SE_CurrentHP)
+	);
+
+	if (!spell_id) {
+		spell_id = (
+			IsEffectInSpell(spell_id, SE_CurrentHPOnce) ?
+			spell_id :
+			GetSpellTriggerSpellID(spell_id, SE_CurrentHPOnce)
+		);
+	}
+
+	if (spell_id && IsValidSpell(spell_id)) {
+		if (
+			(spells[spell_id].target_type == ST_Pet || spells[spell_id].target_type == ST_Undead) &&
+			!IsCompleteHealSpell(spell_id) &&
+			!IsHealOverTimeSpell(spell_id) &&
+			!IsGroupSpell(spell_id)
+		) {
+			for (int i = 0; i < EFFECT_COUNT; i++) {
+				if (
+					spells[spell_id].base_value[i] > 0 &&
+					spells[spell_id].buff_duration == 0 &&
+					(
+						spells[spell_id].effect_id[i] == SE_CurrentHP ||
+						spells[spell_id].effect_id[i] == SE_CurrentHPOnce
+					)
+				) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
 bool IsRegularGroupHealSpell(uint16 spell_id)
 {
 	spell_id = (
@@ -1416,11 +1654,60 @@ bool IsRegularGroupHealSpell(uint16 spell_id)
 	return false;
 }
 
-bool IsGroupCompleteHealSpell(uint16 spell_id)
-{
+bool IsGroupCompleteHealSpell(uint16 spell_id) {
+    if (
+        IsValidSpell(spell_id) &&
+        (
+            spell_id == SPELL_COMPLETE_HEAL ||
+            IsEffectInSpell(spell_id, SE_CompleteHeal) ||
+            IsPercentalHealSpell(spell_id) ||
+            GetSpellTriggerSpellID(spell_id, SE_CompleteHeal)
+        ) &&
+        IsGroupSpell(spell_id)
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+bool IsGroupHealOverTimeSpell(uint16 spell_id) {
+    if (
+        IsValidSpell(spell_id) &&
+        (
+            IsEffectInSpell(spell_id, SE_HealOverTime) ||
+            GetSpellTriggerSpellID(spell_id, SE_HealOverTime)
+        ) &&
+        IsGroupSpell(spell_id)
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+bool IsAnyHealSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (spell_id == SPELL_NATURES_RECOVERY) {
+		return false;
+	}
+
+	//spell_id != SPELL_ADRENALINE_SWELL &&
+	//spell_id != SPELL_ADRENALINE_SWELL_RK2 &&
+	//spell_id != SPELL_ADRENALINE_SWELL_RK3 &&
 	if (
-		IsGroupSpell(spell_id) &&
-		IsCompleteHealSpell(spell_id)
+		IsHealOverTimeSpell(spell_id) ||
+		IsGroupHealOverTimeSpell(spell_id) ||
+		IsFastHealSpell(spell_id) ||
+		IsVeryFastHealSpell(spell_id) ||
+		IsRegularSingleTargetHealSpell(spell_id) ||
+		IsRegularGroupHealSpell(spell_id) ||
+		IsCompleteHealSpell(spell_id) ||
+		IsGroupCompleteHealSpell(spell_id) ||
+		IsRegularPetHealSpell(spell_id)
 	) {
 		return true;
 	}
@@ -1428,22 +1715,64 @@ bool IsGroupCompleteHealSpell(uint16 spell_id)
 	return false;
 }
 
-bool IsGroupHealOverTimeSpell(uint16 spell_id)
-{
+bool IsAnyBuffSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
 	if (
-		IsGroupSpell(spell_id) &&
-		IsHealOverTimeSpell(spell_id) &&
-		spells[spell_id].buff_duration < 10
+		spell_id == SPELL_NATURES_RECOVERY ||
+		IsBuffSpell(spell_id) &&
+		IsBeneficialSpell(spell_id) &&
+		!IsBardSong(spell_id) &&
+		!IsEscapeSpell(spell_id) &&
+		(!IsSummonPetSpell(spell_id) && !IsEffectInSpell(spell_id, SE_TemporaryPets))
 	) {
 		return true;
 	}
 
 	return false;
+}
+bool IsDispelSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (
+		IsEffectInSpell(spell_id, SE_CancelMagic) ||
+		IsEffectInSpell(spell_id, SE_DispelBeneficial) ||
+		IsEffectInSpell(spell_id, SE_DispelBeneficial)
+	) {
+		return true;
+	}
+
+	return false;
+}
+
+bool IsEscapeSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
+		IsInvulnerabilitySpell(spell_id) ||
+		IsEffectInSpell(spell_id, SE_FeignDeath) ||
+		IsEffectInSpell(spell_id, SE_DeathSave) ||
+		IsEffectInSpell(spell_id, SE_Destroy) ||
+		(
+			IsEffectInSpell(spell_id, SE_WipeHateList) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_WipeHateList)] > 0
+		)
+	);
 }
 
 bool IsDebuffSpell(uint16 spell_id)
 {
-	if (
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return !(
 		IsBeneficialSpell(spell_id) ||
 		IsHealthSpell(spell_id) ||
 		IsStunSpell(spell_id) ||
@@ -1454,17 +1783,39 @@ bool IsDebuffSpell(uint16 spell_id)
 		IsEffectInSpell(spell_id, SE_CancelMagic) ||
 		IsEffectInSpell(spell_id, SE_MovementSpeed) ||
 		IsFearSpell(spell_id) ||
-		IsEffectInSpell(spell_id, SE_InstantHate)
-	) {
+		IsEffectInSpell(spell_id, SE_InstantHate) ||
+		IsEffectInSpell(spell_id, SE_TossUp)
+	);
+}
+
+bool IsHateReduxSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
 		return false;
 	}
 
-	return true;
+	return (
+		(
+			IsEffectInSpell(spell_id, SE_InstantHate) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_InstantHate)] < 0
+		) ||
+		(
+			IsEffectInSpell(spell_id, SE_Hate) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_Hate)] < 0
+		) ||
+		(
+			IsEffectInSpell(spell_id, SE_ReduceHate) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_ReduceHate)] < 0
+		)
+	);
 }
 
 bool IsResistDebuffSpell(uint16 spell_id)
 {
-	if (
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
 		!IsBeneficialSpell(spell_id) &&
 		(
 			IsEffectInSpell(spell_id, SE_ResistFire) ||
@@ -1475,42 +1826,34 @@ bool IsResistDebuffSpell(uint16 spell_id)
 			IsEffectInSpell(spell_id, SE_ResistAll) ||
 			IsEffectInSpell(spell_id, SE_ResistCorruption)
 		)
-	) {
-		return true;
-	}
-
-	return false;
+	);
 }
 
 bool IsSelfConversionSpell(uint16 spell_id)
 {
-	if (
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
 		GetSpellTargetType(spell_id) == ST_Self &&
 		IsEffectInSpell(spell_id, SE_CurrentMana) &&
 		IsEffectInSpell(spell_id, SE_CurrentHP) &&
 		spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_CurrentMana)] > 0 &&
 		spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_CurrentHP)] < 0
-	) {
-		return true;
-	}
-
-	return false;
+	);
 }
 
 // returns true for both detrimental and beneficial buffs
 bool IsBuffSpell(uint16 spell_id)
 {
-	if (
+	return (
 		IsValidSpell(spell_id) &&
 		(
 			spells[spell_id].buff_duration ||
 			spells[spell_id].buff_duration_formula
 		)
-	) {
-		return true;
-	}
-
-	return false;
+	);
 }
 
 bool IsPersistDeathSpell(uint16 spell_id)
@@ -2314,4 +2657,354 @@ bool IsCastNotStandingSpell(uint16 spell_id) {
 		This field also allows for damage to ignore DA immunity.
 	*/
 	return spells[spell_id].cast_not_standing;
+}
+
+bool IsAegolismSpell(uint16 spell_id) {
+
+	if (!IsValidSpell(spell_id)) {
+		return 0;
+	}
+
+	bool has_max_hp = false;
+	bool has_current_hp = false;
+	bool has_ac = false;
+
+	for (int i = 0; i < EFFECT_COUNT; ++i) {
+
+		if (i == 0 && spells[spell_id].effect_id[i] != SE_StackingCommand_Block) {
+			return 0;
+		}
+
+		if (i == 1 && spells[spell_id].effect_id[i] == SE_TotalHP) {
+			has_max_hp = true;
+		}
+
+		if (i == 2 && spells[spell_id].effect_id[i] == SE_CurrentHPOnce) {
+			has_current_hp = true;
+		}
+
+		if (i == 3 && spells[spell_id].effect_id[i] == SE_ArmorClass) {
+			has_ac = true;
+		}
+
+		if (i == 4 && spells[spell_id].effect_id[i] != SE_StackingCommand_Overwrite) {
+			return 0;
+		}
+	}
+
+	if (has_max_hp && has_current_hp && has_ac) {
+		return 1;
+	}
+	return 0;
+}
+
+
+bool AegolismStackingIsSymbolSpell(uint16 spell_id) {
+
+	/*
+		This is hardcoded to be specific to the type of HP buffs that are removed if a mob has an Aegolism buff.
+	*/
+
+	if (!IsValidSpell(spell_id)) {
+		return 0;
+	}
+
+	bool has_max_hp = false;
+	bool has_current_hp = false;
+
+	for (int i = 0; i < EFFECT_COUNT; ++i) {
+
+		if ((i < 2 && spells[spell_id].effect_id[i] != SE_CHA) ||
+			i > 3 && spells[spell_id].effect_id[i] != SE_Blank) {
+			return 0;
+		}
+
+		if (i == 2 && spells[spell_id].effect_id[i] == SE_TotalHP) {
+			has_max_hp = true;
+		}
+
+		if (i == 3 && spells[spell_id].effect_id[i] == SE_CurrentHPOnce) {
+			has_current_hp = true;
+		}
+	}
+
+	if (has_max_hp && has_current_hp) {
+		return 1;
+	}
+
+	return 0;
+}
+
+bool AegolismStackingIsArmorClassSpell(uint16 spell_id) {
+	/*
+		This is hardcoded to be specific to the type of AC buffs that are removed if a mob has an Aegolism buff.
+	*/
+	if (!IsValidSpell(spell_id)) {
+		return 0;
+	}
+
+	bool has_ac = false;
+
+	for (int i = 0; i < EFFECT_COUNT; ++i) {
+
+		if ((i < 3 && spells[spell_id].effect_id[i] != SE_CHA) ||
+			i > 3 && spells[spell_id].effect_id[i] != SE_Blank) {
+			return 0;
+		}
+
+		if (i == 3 && spells[spell_id].effect_id[i] == SE_ArmorClass) {
+			has_ac = true;
+		}
+	}
+
+	if (has_ac) {
+		return 1;
+	}
+
+	return 0;
+}
+
+int8 SpellEffectsCount(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	int8 x = 0;
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		if (!IsBlankSpellEffect(spell_id, i)) {
+			++x;
+		}
+	}
+
+	return x;
+}
+
+bool IsLichSpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
+		GetSpellTargetType(spell_id) == ST_Self &&
+		IsEffectInSpell(spell_id, SE_CurrentMana) &&
+		IsEffectInSpell(spell_id, SE_CurrentHP) &&
+		spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_CurrentMana)] > 0 &&
+		spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_CurrentHP)] < 0 &&
+		spells[spell_id].buff_duration > 0
+	);
+}
+
+bool IsValidSpellAndLoS(uint32 spell_id, bool has_los) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (!has_los && IsTargetRequiredForSpell(spell_id)) {
+		return false;
+	}
+
+	return true;
+}
+
+bool IsInstantHealSpell(uint32 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
+		IsRegularSingleTargetHealSpell(spell_id) ||
+		IsRegularGroupHealSpell(spell_id) ||
+		IsRegularPetHealSpell(spell_id) ||
+		IsRegularGroupHealSpell(spell_id) ||
+		spell_id == SPELL_COMPLETE_HEAL
+	);
+}
+
+bool IsResurrectSpell(uint16 spell_id)
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return IsEffectInSpell(spell_id, SE_Revive);
+}
+
+bool IsResistanceBuffSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		if (IsBlankSpellEffect(spell_id, i)) {
+			continue;
+		}
+
+		if (
+			spell.effect_id[i] == SE_ResistFire ||
+			spell.effect_id[i] == SE_ResistCold ||
+			spell.effect_id[i] == SE_ResistPoison ||
+			spell.effect_id[i] == SE_ResistDisease ||
+			spell.effect_id[i] == SE_ResistMagic ||
+			spell.effect_id[i] == SE_ResistCorruption ||
+			spell.effect_id[i] == SE_ResistAll
+		) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool IsResistanceOnlySpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		if (IsBlankSpellEffect(spell_id, i)) {
+			continue;
+		}
+
+		if (
+			spell.effect_id[i] == SE_ResistFire ||
+			spell.effect_id[i] == SE_ResistCold ||
+			spell.effect_id[i] == SE_ResistPoison ||
+			spell.effect_id[i] == SE_ResistDisease ||
+			spell.effect_id[i] == SE_ResistMagic ||
+			spell.effect_id[i] == SE_ResistCorruption ||
+			spell.effect_id[i] == SE_ResistAll
+		) {
+			continue;
+		}
+
+		return false;
+	}
+
+	return true;
+}
+
+bool IsDamageShieldOnlySpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		if (IsBlankSpellEffect(spell_id, i)) {
+			continue;
+		}
+
+		if (
+			spell.effect_id[i] != SE_DamageShield
+		) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool IsDamageShieldAndResistSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const auto& spell = spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; i++) {
+		if (IsBlankSpellEffect(spell_id, i)) {
+			continue;
+		}
+
+		if (
+			spell.effect_id[i] != SE_DamageShield &&
+			spell.effect_id[i] != SE_ResistFire &&
+			spell.effect_id[i] != SE_ResistCold &&
+			spell.effect_id[i] != SE_ResistPoison &&
+			spell.effect_id[i] != SE_ResistDisease &&
+			spell.effect_id[i] != SE_ResistMagic &&
+			spell.effect_id[i] != SE_ResistCorruption &&
+			spell.effect_id[i] != SE_ResistAll
+		) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool IsHateSpell(uint16 spell_id) {
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	return (
+		(
+			IsEffectInSpell(spell_id, SE_Hate) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_Hate)] > 0
+		) ||
+		(
+			IsEffectInSpell(spell_id, SE_InstantHate) &&
+			spells[spell_id].base_value[GetSpellEffectIndex(spell_id, SE_InstantHate)] > 0
+		)
+	);
+}
+
+
+bool IsDisciplineTome(const EQ::ItemData* item)
+{
+	if (!item->IsClassCommon() || item->ItemType != EQ::item::ItemTypeSpell) {
+		return false;
+	}
+
+	//Need a way to determine the difference between a spell and a tome
+	//so they cant turn in a spell and get it as a discipline
+	//this is kinda a hack:
+
+	const std::string item_name = item->Name;
+
+	if (
+		!Strings::BeginsWith(item_name, "Tome of ") &&
+		!Strings::BeginsWith(item_name, "Skill: ")
+		) {
+		return false;
+	}
+
+	//we know for sure none of the int casters get disciplines
+	uint32 class_bit = 0;
+	class_bit |= 1 << (Class::Wizard - 1);
+	class_bit |= 1 << (Class::Enchanter - 1);
+	class_bit |= 1 << (Class::Magician - 1);
+	class_bit |= 1 << (Class::Necromancer - 1);
+	if (item->Classes & class_bit) {
+		return false;
+	}
+
+	const auto& spell_id = static_cast<uint32>(item->Scroll.Effect);
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	if (!IsDiscipline(spell_id)) {
+		return false;
+	}
+
+	const auto &spell = spells[spell_id];
+	if (
+		spell.classes[Class::Wizard - 1] != 255 &&
+		spell.classes[Class::Enchanter - 1] != 255 &&
+		spell.classes[Class::Magician - 1] != 255 &&
+		spell.classes[Class::Necromancer - 1] != 255
+		) {
+		return false;
+	}
+
+	return true;
 }

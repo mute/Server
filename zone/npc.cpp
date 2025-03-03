@@ -49,6 +49,7 @@
 
 #include "bot.h"
 #include "../common/skill_caps.h"
+#include "../common/events/player_event_logs.h"
 
 #include <stdio.h>
 #include <string>
@@ -61,9 +62,11 @@
 #else
 #include <stdlib.h>
 #include <pthread.h>
+
 #endif
 
 extern Zone* zone;
+extern QueryServ* QServ;
 extern volatile bool is_zone_loaded;
 extern EntityList entity_list;
 
@@ -76,7 +79,7 @@ NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &posi
 		  npc_type_data->gender,
 		  npc_type_data->race,
 		  npc_type_data->class_,
-		  (bodyType) npc_type_data->bodytype,
+		  npc_type_data->bodytype,
 		  npc_type_data->deity,
 		  npc_type_data->level,
 		  npc_type_data->npc_id,
@@ -129,6 +132,9 @@ NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &posi
 	  ),
 	  attacked_timer(CombatEventTimer_expire),
 	  swarm_timer(100),
+	  m_corpse_queue_timer(1000),
+	  m_corpse_queue_shutoff_timer(30000),
+	  m_resumed_from_zone_suspend_shutoff_timer(30000),
 	  classattack_timer(1000),
 	  monkattack_timer(1000),
 	  knightattack_timer(1000),
@@ -226,6 +232,7 @@ NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &posi
 	ATK                  = npc_type_data->ATK;
 	heroic_strikethrough = npc_type_data->heroic_strikethrough;
 	keeps_sold_items     = npc_type_data->keeps_sold_items;
+	m_multiquest_enabled = npc_type_data->multiquest_enabled;
 
 	// used for when switch back to charm
 	default_ac               = npc_type_data->AC;
@@ -451,7 +458,7 @@ NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &posi
 
 	RestoreMana();
 
-	if (GetBodyType() == BT_Animal && !RuleB(NPC, AnimalsOpenDoors)) {
+	if (GetBodyType() == BodyType::Animal && !RuleB(NPC, AnimalsOpenDoors)) {
 		m_can_open_doors = false;
 	}
 
@@ -582,7 +589,7 @@ bool NPC::Process()
 		Mob* owner = entity_list.GetMob(ownerid);
 		if (owner != 0)
 		{
-			//if(GetBodyType() != BT_SwarmPet)
+			//if(GetBodyType() != BodyType::SwarmPet)
 			// owner->SetPetID(0);
 			ownerid = 0;
 			petid = 0;
@@ -601,27 +608,12 @@ bool NPC::Process()
 		DepopSwarmPets();
 	}
 
-	if (mob_close_scan_timer.Check()) {
-		entity_list.ScanCloseMobs(close_mobs, this, IsMoving());
+	if (m_scan_close_mobs_timer.Check()) {
+		entity_list.ScanCloseMobs(this);
 	}
 
-	const uint16 npc_mob_close_scan_timer_moving = 6000;
-	const uint16 npc_mob_close_scan_timer_idle   = 60000;
-
-	if (mob_check_moving_timer.Check()) {
-		if (moving) {
-			if (mob_close_scan_timer.GetRemainingTime() > npc_mob_close_scan_timer_moving) {
-				LogAIScanCloseDetail("NPC [{}] Restarting with moving timer", GetCleanName());
-				mob_close_scan_timer.Disable();
-				mob_close_scan_timer.Start(npc_mob_close_scan_timer_moving);
-				mob_close_scan_timer.Trigger();
-			}
-		}
-		else if (mob_close_scan_timer.GetDuration() == npc_mob_close_scan_timer_moving) {
-			LogAIScanCloseDetail("NPC [{}] Restarting with idle timer", GetCleanName());
-			mob_close_scan_timer.Disable();
-			mob_close_scan_timer.Start(npc_mob_close_scan_timer_idle);
-		}
+	if (m_mob_check_moving_timer.Check()) {
+		CheckScanCloseMobsMovingTimer();
 	}
 
 	if (hp_regen_per_second > 0 && hp_regen_per_second_timer.Check()) {
@@ -630,7 +622,49 @@ bool NPC::Process()
 		}
 	}
 
+	// zone state corpse creation timer
+	if (RuleB(Zone, StateSavingOnShutdown)) {
+		// creates a corpse if the NPC is queued for corpse creation
+		if (m_corpse_queue_timer.Check()) {
+			if (IsQueuedForCorpse()) {
+				auto   decay_timer = m_corpse_decay_time;
+				uint16 corpse_id   = GetID();
+				Death(this, GetHP() + 1, SPELL_UNKNOWN, EQ::skills::SkillHandtoHand);
+				auto c = entity_list.GetCorpseByID(corpse_id);
+				if (c) {
+					c->UnLock();
+					c->SetDecayTimer(decay_timer);
+				}
+			}
+			m_corpse_queue_timer.Disable();
+			m_corpse_queue_shutoff_timer.Disable();
+		}
+
+		// shuts off the corpse queue timer if it is still running
+		if (m_corpse_queue_shutoff_timer.Check()) {
+			m_corpse_queue_timer.Disable();
+			m_corpse_queue_shutoff_timer.Disable();
+		}
+
+		// shuts off the temporary spawn protected state of the NPC
+		if (m_resumed_from_zone_suspend_shutoff_timer.Check()) {
+			m_resumed_from_zone_suspend_shutoff_timer.Disable();
+			SetResumedFromZoneSuspend(false);
+		}
+	}
+
 	if (tic_timer.Check()) {
+		if (RuleB(Zone, StateSavingOnShutdown) && IsQueuedForCorpse()) {
+			auto decay_timer = m_corpse_decay_time;
+			uint16 corpse_id = GetID();
+			Death(this, GetHP() + 1, SPELL_UNKNOWN, EQ::skills::SkillHandtoHand);
+			auto c = entity_list.GetCorpseByID(corpse_id);
+			if (c) {
+				c->UnLock();
+				c->SetDecayTimer(decay_timer);
+			}
+		}
+
 		if (parse->HasQuestSub(GetNPCTypeID(), EVENT_TICK)) {
 			parse->EventNPC(EVENT_TICK, this, nullptr, "", 0);
 		}
@@ -767,7 +801,7 @@ bool NPC::Process()
 		ProcessEnrage();
 
 		/* Don't keep running the check every second if we don't have enrage */
-		if (!GetSpecialAbility(SPECATK_ENRAGE)) {
+		if (!GetSpecialAbility(SpecialAbility::Enrage)) {
 			enraged_timer.Disable();
 		}
 	}
@@ -797,6 +831,11 @@ bool NPC::Process()
 		{
 			qGlobals->PurgeExpiredGlobals();
 		}
+	}
+
+	if (bot_attack_flag_timer.Check()) {
+		bot_attack_flag_timer.Disable();
+		ClearBotAttackFlags();
 	}
 
 	AI_Process();
@@ -848,22 +887,10 @@ void NPC::Depop(bool start_spawn_timer) {
 		DoNPCEmote(EQ::constants::EmoteEventTypes::OnDespawn, emoteid);
 	}
 
-	if (IsNPC()) {
-		if (parse->HasQuestSub(GetNPCTypeID(), EVENT_DESPAWN)) {
-			parse->EventNPC(EVENT_DESPAWN, this, nullptr, "", 0);
-		}
+	parse->EventBotMercNPC(EVENT_DESPAWN, this, nullptr);
 
-		if (parse->HasQuestSub(ZONE_CONTROLLER_NPC_ID, EVENT_DESPAWN_ZONE)) {
-			DispatchZoneControllerEvent(EVENT_DESPAWN_ZONE, this, "", 0, nullptr);
-		}
-	} else if (IsBot()) {
-		if (parse->BotHasQuestSub(EVENT_DESPAWN)) {
-			parse->EventBot(EVENT_DESPAWN, CastToBot(), nullptr, "", 0);
-		}
-
-		if (parse->HasQuestSub(ZONE_CONTROLLER_NPC_ID, EVENT_DESPAWN_ZONE)) {
-			DispatchZoneControllerEvent(EVENT_DESPAWN_ZONE, this, "", 0, nullptr);
-		}
+	if (parse->HasQuestSub(ZONE_CONTROLLER_NPC_ID, EVENT_DESPAWN_ZONE)) {
+		DispatchZoneControllerEvent(EVENT_DESPAWN_ZONE, this, "", 0, nullptr);
 	}
 
 	p_depop = true;
@@ -878,9 +905,9 @@ void NPC::Depop(bool start_spawn_timer) {
 
 bool NPC::SpawnZoneController()
 {
-
-	if (!RuleB(Zone, UseZoneController))
+	if (!RuleB(Zone, UseZoneController)) {
 		return false;
+	}
 
 	auto npc_type = new NPCType;
 	memset(npc_type, 0, sizeof(NPCType));
@@ -1019,8 +1046,8 @@ NPC * NPC::SpawnNodeNPC(std::string name, std::string last_name, const glm::vec4
 
 	npc_type->current_hp       = 4000000;
 	npc_type->max_hp           = 4000000;
-	npc_type->race             = 2254;
-	npc_type->gender           = 2;
+	npc_type->race             = 127;
+	npc_type->gender           = 0;
 	npc_type->class_           = 9;
 	npc_type->deity            = 1;
 	npc_type->level            = 200;
@@ -1183,7 +1210,14 @@ NPC* NPC::SpawnNPC(const char* spawncommand, const glm::vec4& position, Client* 
 			}
 
 			if (npc->bodytype) {
-				client->Message(Chat::White, fmt::format("Body Type | {} ({})", EQ::constants::GetBodyTypeName(npc->bodytype), npc->bodytype).c_str());
+				client->Message(
+					Chat::White,
+					fmt::format(
+						"Body Type | {} ({})",
+						BodyType::GetName(npc->bodytype),
+						npc->bodytype
+					).c_str()
+				);
 			}
 
 			client->Message(Chat::White, "New NPC spawned!");
@@ -1209,6 +1243,7 @@ uint32 ZoneDatabase::CreateNewNPCCommand(
 	e.race            = n->GetRace();
 	e.class_          = n->GetClass();
 	e.hp              = n->GetMaxHP();
+	e.mana            = n->GetMaxMana();
 	e.gender          = n->GetGender();
 	e.texture         = n->GetTexture();
 	e.helmtexture     = n->GetHelmTexture();
@@ -1216,8 +1251,50 @@ uint32 ZoneDatabase::CreateNewNPCCommand(
 	e.loottable_id    = n->GetLoottableID();
 	e.merchant_id     = n->MerchantType;
 	e.runspeed        = n->GetRunspeed();
-	e.prim_melee_type = static_cast<uint8_t>(EQ::skills::SkillHandtoHand);
-	e.sec_melee_type  = static_cast<uint8_t>(EQ::skills::SkillHandtoHand);
+	e.walkspeed       = n->GetWalkspeed();
+	e.prim_melee_type = n->GetPrimSkill();
+	e.sec_melee_type  = n->GetSecSkill();
+
+	e.bodytype        = n->GetBodyType();
+	e.npc_faction_id  = n->GetNPCFactionID();
+	e.aggroradius     = n->GetAggroRange();
+	e.assistradius    = n->GetAssistRange();
+
+	e.AC              = n->GetAC();
+	e.ATK             = n->GetATK();
+	e.STR             = n->GetSTR();
+	e.STA             = n->GetSTA();
+	e.AGI             = n->GetAGI();
+	e.DEX             = n->GetDEX();
+	e.WIS             = n->GetWIS();
+	e._INT            = n->GetINT();
+	e.CHA             = n->GetCHA();
+
+	e.PR              = n->GetPR();
+	e.MR              = n->GetMR();
+	e.DR              = n->GetDR();
+	e.FR              = n->GetFR();
+	e.CR              = n->GetCR();
+	e.Corrup          = n->GetCorrup();
+	e.PhR             = n->GetPhR();
+
+	e.Accuracy        = n->GetAccuracyRating();
+	e.slow_mitigation = n->GetSlowMitigation();
+	e.mindmg          = n->GetMinDMG();
+	e.maxdmg          = n->GetMaxDMG();
+	e.hp_regen_rate   = n->GetHPRegen();
+	e.hp_regen_per_second = n->GetHPRegenPerSecond();
+	//e.attack_delay    = n->GetAttackDelay(); // Attack delay isn't copying correctly, 3000 becomes 18,400 in the copied NPC?
+	e.spellscale      = n->GetSpellScale();
+	e.healscale       = n->GetHealScale();
+	e.Avoidance       = n->GetAvoidanceRating();
+	e.heroic_strikethrough = n->GetHeroicStrikethrough();
+
+	e.see_hide        = n->SeeHide();
+	e.see_improved_hide = n->SeeImprovedHide();
+	e.see_invis       = n->SeeInvisible();
+	e.see_invis_undead = n->SeeInvisibleUndead();
+
 
 	e = NpcTypesRepository::InsertOne(*this, e);
 
@@ -1228,9 +1305,10 @@ uint32 ZoneDatabase::CreateNewNPCCommand(
 	auto sg = SpawngroupRepository::NewEntity();
 
 	sg.name = fmt::format(
-		"{}-{}",
+		"{}_{}_{}",
 		zone,
-		n->GetName()
+		Strings::Escape(n->GetName()),
+		Timer::GetCurrentTime()
 	);
 
 	sg = SpawngroupRepository::InsertOne(*this, sg);
@@ -1249,7 +1327,7 @@ uint32 ZoneDatabase::CreateNewNPCCommand(
 	s2.x            = n->GetX();
 	s2.y            = n->GetY();
 	s2.z            = n->GetZ();
-	s2.respawntime  = 1200;
+	s2.respawntime  = extra > 0 ? extra : 1200;
 	s2.heading      = n->GetHeading();
 	s2.spawngroupID = sg.id;
 
@@ -1361,12 +1439,17 @@ uint32 ZoneDatabase::UpdateNPCTypeAppearance(Client* c, NPC* n)
 	return updated;
 }
 
-uint32 ZoneDatabase::DeleteSpawnLeaveInNPCTypeTable(const std::string& zone, Client* c, NPC* n)
+uint32 ZoneDatabase::DeleteSpawnLeaveInNPCTypeTable(const std::string& zone, Client* c, NPC* n, uint32 remove_spawngroup_id)
 {
+	if (!n->respawn2) {
+		return 0;
+	}
+
 	const auto& l = Spawn2Repository::GetWhere(
 		*this,
 		fmt::format(
-			"`zone` = '{}' AND `spawngroupID` = {}",
+			"`id` = {} AND `zone` = '{}' AND `spawngroupID` = {}",
+			n->respawn2->GetID(),
 			zone,
 			n->GetSpawnGroupId()
 		)
@@ -1382,12 +1465,14 @@ uint32 ZoneDatabase::DeleteSpawnLeaveInNPCTypeTable(const std::string& zone, Cli
 		return 0;
 	}
 
-	if (!SpawngroupRepository::DeleteOne(*this, e.spawngroupID)) {
-		return 0;
-	}
+	if (remove_spawngroup_id > 0) {
+		if (!SpawngroupRepository::DeleteOne(*this, e.spawngroupID)) {
+			return 0;
+		}
 
-	if (!SpawnentryRepository::DeleteOne(*this, e.spawngroupID)) {
-		return 0;
+		if (!SpawnentryRepository::DeleteOne(*this, e.spawngroupID)) {
+			return 0;
+		}
 	}
 
 	return 1;
@@ -1440,7 +1525,7 @@ uint32 ZoneDatabase::AddSpawnFromSpawnGroup(
 	uint32 instance_version,
 	Client* c,
 	NPC* n,
-	uint32 spawngroup_id
+	uint32 extra
 )
 {
 	auto e = Spawn2Repository::NewEntity();
@@ -1451,8 +1536,8 @@ uint32 ZoneDatabase::AddSpawnFromSpawnGroup(
 	e.y            = c->GetY();
 	e.z            = c->GetZ();
 	e.heading      = c->GetHeading();
-	e.respawntime  = 120;
-	e.spawngroupID = spawngroup_id;
+	e.respawntime  = extra > 0 ? extra : 1200;
+	e.spawngroupID = n->GetSpawnGroupId();
 
 	e = Spawn2Repository::InsertOne(*this, e);
 
@@ -1529,7 +1614,7 @@ uint32 ZoneDatabase::NPCSpawnDB(
 			return UpdateNPCTypeAppearance(c, n);
 		}
 		case NPCSpawnTypes::RemoveSpawn: {
-			return DeleteSpawnLeaveInNPCTypeTable(zone, c, n);
+			return DeleteSpawnLeaveInNPCTypeTable(zone, c, n, extra);
 		}
 		case NPCSpawnTypes::DeleteSpawn: {
 			return DeleteSpawnRemoveFromNPCTypeTable(zone, instance_version, c, n);
@@ -1785,7 +1870,7 @@ void NPC::Disarm(Client* client, int chance) {
 			int matslot = eslot == EQ::invslot::slotPrimary ? EQ::textures::weaponPrimary : EQ::textures::weaponSecondary;
 			if (matslot != -1)
 				SendWearChange(matslot);
-			if ((CastToMob()->GetBodyType() == BT_Humanoid || CastToMob()->GetBodyType() == BT_Summoned) && eslot == EQ::invslot::slotPrimary)
+			if ((CastToMob()->GetBodyType() == BodyType::Humanoid || CastToMob()->GetBodyType() == BodyType::Summoned) && eslot == EQ::invslot::slotPrimary)
 				Say("Ahh! My weapon!");
 			client->MessageString(Chat::Skills, DISARM_SUCCESS, GetCleanName());
 			if (chance != 1000)
@@ -1812,127 +1897,127 @@ void Mob::NPCSpecialAttacks(const char* parse, int permtag, bool reset, bool rem
 		switch(*parse)
 		{
 			case 'E':
-				SetSpecialAbility(SPECATK_ENRAGE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::Enrage, remove ? 0 : 1);
 				break;
 			case 'F':
-				SetSpecialAbility(SPECATK_FLURRY, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::Flurry, remove ? 0 : 1);
 				break;
 			case 'R':
-				SetSpecialAbility(SPECATK_RAMPAGE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::Rampage, remove ? 0 : 1);
 				break;
 			case 'r':
-				SetSpecialAbility(SPECATK_AREA_RAMPAGE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::AreaRampage, remove ? 0 : 1);
 				break;
 			case 'S':
 				if(remove) {
-					SetSpecialAbility(SPECATK_SUMMON, 0);
-					StopSpecialAbilityTimer(SPECATK_SUMMON);
+					SetSpecialAbility(SpecialAbility::Summon, 0);
+					StopSpecialAbilityTimer(SpecialAbility::Summon);
 				} else {
-					SetSpecialAbility(SPECATK_SUMMON, 1);
+					SetSpecialAbility(SpecialAbility::Summon, 1);
 				}
 			break;
 			case 'T':
-				SetSpecialAbility(SPECATK_TRIPLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::TripleAttack, remove ? 0 : 1);
 				break;
 			case 'Q':
 				//quad requires triple to work properly
 				if(remove) {
-					SetSpecialAbility(SPECATK_QUAD, 0);
+					SetSpecialAbility(SpecialAbility::QuadrupleAttack, 0);
 				} else {
-					SetSpecialAbility(SPECATK_TRIPLE, 1);
-					SetSpecialAbility(SPECATK_QUAD, 1);
+					SetSpecialAbility(SpecialAbility::TripleAttack, 1);
+					SetSpecialAbility(SpecialAbility::QuadrupleAttack, 1);
 					}
 				break;
 			case 'b':
-				SetSpecialAbility(SPECATK_BANE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::BaneAttack, remove ? 0 : 1);
 				break;
 			case 'm':
-				SetSpecialAbility(SPECATK_MAGICAL, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MagicalAttack, remove ? 0 : 1);
 				break;
 			case 'U':
-				SetSpecialAbility(UNSLOWABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::SlowImmunity, remove ? 0 : 1);
 				break;
 			case 'M':
-				SetSpecialAbility(UNMEZABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MesmerizeImmunity, remove ? 0 : 1);
 				break;
 			case 'C':
-				SetSpecialAbility(UNCHARMABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::CharmImmunity, remove ? 0 : 1);
 				break;
 			case 'N':
-				SetSpecialAbility(UNSTUNABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::StunImmunity, remove ? 0 : 1);
 				break;
 			case 'I':
-				SetSpecialAbility(UNSNAREABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::SnareImmunity, remove ? 0 : 1);
 				break;
 			case 'D':
-				SetSpecialAbility(UNFEARABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::FearImmunity, remove ? 0 : 1);
 				break;
 			case 'K':
-				SetSpecialAbility(UNDISPELLABLE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::DispellImmunity, remove ? 0 : 1);
 				break;
 			case 'A':
-				SetSpecialAbility(IMMUNE_MELEE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MeleeImmunity, remove ? 0 : 1);
 				break;
 			case 'B':
-				SetSpecialAbility(IMMUNE_MAGIC, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MagicImmunity, remove ? 0 : 1);
 				break;
 			case 'f':
-				SetSpecialAbility(IMMUNE_FLEEING, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::FleeingImmunity, remove ? 0 : 1);
 				break;
 			case 'O':
-				SetSpecialAbility(IMMUNE_MELEE_EXCEPT_BANE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MeleeImmunityExceptBane, remove ? 0 : 1);
 				break;
 			case 'W':
-				SetSpecialAbility(IMMUNE_MELEE_NONMAGICAL, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::MeleeImmunityExceptMagical, remove ? 0 : 1);
 				break;
 			case 'H':
-				SetSpecialAbility(IMMUNE_AGGRO, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::AggroImmunity, remove ? 0 : 1);
 				break;
 			case 'G':
-				SetSpecialAbility(IMMUNE_AGGRO_ON, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::BeingAggroImmunity, remove ? 0 : 1);
 				break;
 			case 'g':
-				SetSpecialAbility(IMMUNE_CASTING_FROM_RANGE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::CastingFromRangeImmunity, remove ? 0 : 1);
 				break;
 			case 'd':
-				SetSpecialAbility(IMMUNE_FEIGN_DEATH, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::FeignDeathImmunity, remove ? 0 : 1);
 				break;
 			case 'Y':
-				SetSpecialAbility(SPECATK_RANGED_ATK, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::RangedAttack, remove ? 0 : 1);
 				break;
 			case 'L':
-				SetSpecialAbility(SPECATK_INNATE_DW, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::DualWield, remove ? 0 : 1);
 				break;
 			case 't':
-				SetSpecialAbility(NPC_TUNNELVISION, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::TunnelVision, remove ? 0 : 1);
 				break;
 			case 'n':
-				SetSpecialAbility(NPC_NO_BUFFHEAL_FRIENDS, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::NoBuffHealFriends, remove ? 0 : 1);
 				break;
 			case 'p':
-				SetSpecialAbility(IMMUNE_PACIFY, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::PacifyImmunity, remove ? 0 : 1);
 				break;
 			case 'J':
-				SetSpecialAbility(LEASH, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::Leash, remove ? 0 : 1);
 				break;
 			case 'j':
-				SetSpecialAbility(TETHER, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::Tether, remove ? 0 : 1);
 				break;
 			case 'o':
-				SetSpecialAbility(DESTRUCTIBLE_OBJECT, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::DestructibleObject, remove ? 0 : 1);
 				SetDestructibleObject(remove ? true : false);
 				break;
 			case 'Z':
-				SetSpecialAbility(NO_HARM_FROM_CLIENT, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::HarmFromClientImmunity, remove ? 0 : 1);
 				break;
 			case 'i':
-				SetSpecialAbility(IMMUNE_TAUNT, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::TauntImmunity, remove ? 0 : 1);
 				break;
 			case 'e':
-				SetSpecialAbility(ALWAYS_FLEE, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::AlwaysFlee, remove ? 0 : 1);
 				break;
 			case 'h':
-				SetSpecialAbility(FLEE_PERCENT, remove ? 0 : 1);
+				SetSpecialAbility(SpecialAbility::FleePercent, remove ? 0 : 1);
 				break;
 
 			default:
@@ -1959,147 +2044,147 @@ bool Mob::HasNPCSpecialAtk(const char* parse) {
 		switch(*parse)
 		{
 			case 'E':
-				if (!GetSpecialAbility(SPECATK_ENRAGE))
+				if (!GetSpecialAbility(SpecialAbility::Enrage))
 					HasAllAttacks = false;
 				break;
 			case 'F':
-				if (!GetSpecialAbility(SPECATK_FLURRY))
+				if (!GetSpecialAbility(SpecialAbility::Flurry))
 					HasAllAttacks = false;
 				break;
 			case 'R':
-				if (!GetSpecialAbility(SPECATK_RAMPAGE))
+				if (!GetSpecialAbility(SpecialAbility::Rampage))
 					HasAllAttacks = false;
 				break;
 			case 'r':
-				if (!GetSpecialAbility(SPECATK_AREA_RAMPAGE))
+				if (!GetSpecialAbility(SpecialAbility::AreaRampage))
 					HasAllAttacks = false;
 				break;
 			case 'S':
-				if (!GetSpecialAbility(SPECATK_SUMMON))
+				if (!GetSpecialAbility(SpecialAbility::Summon))
 					HasAllAttacks = false;
 				break;
 			case 'T':
-				if (!GetSpecialAbility(SPECATK_TRIPLE))
+				if (!GetSpecialAbility(SpecialAbility::TripleAttack))
 					HasAllAttacks = false;
 				break;
 			case 'Q':
-				if (!GetSpecialAbility(SPECATK_QUAD))
+				if (!GetSpecialAbility(SpecialAbility::QuadrupleAttack))
 					HasAllAttacks = false;
 				break;
 			case 'b':
-				if (!GetSpecialAbility(SPECATK_BANE))
+				if (!GetSpecialAbility(SpecialAbility::BaneAttack))
 					HasAllAttacks = false;
 				break;
 			case 'm':
-				if (!GetSpecialAbility(SPECATK_MAGICAL))
+				if (!GetSpecialAbility(SpecialAbility::MagicalAttack))
 					HasAllAttacks = false;
 				break;
 			case 'U':
-				if (!GetSpecialAbility(UNSLOWABLE))
+				if (!GetSpecialAbility(SpecialAbility::SlowImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'M':
-				if (!GetSpecialAbility(UNMEZABLE))
+				if (!GetSpecialAbility(SpecialAbility::MesmerizeImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'C':
-				if (!GetSpecialAbility(UNCHARMABLE))
+				if (!GetSpecialAbility(SpecialAbility::CharmImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'N':
-				if (!GetSpecialAbility(UNSTUNABLE))
+				if (!GetSpecialAbility(SpecialAbility::StunImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'I':
-				if (!GetSpecialAbility(UNSNAREABLE))
+				if (!GetSpecialAbility(SpecialAbility::SnareImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'D':
-				if (!GetSpecialAbility(UNFEARABLE))
+				if (!GetSpecialAbility(SpecialAbility::FearImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'A':
-				if (!GetSpecialAbility(IMMUNE_MELEE))
+				if (!GetSpecialAbility(SpecialAbility::MeleeImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'B':
-				if (!GetSpecialAbility(IMMUNE_MAGIC))
+				if (!GetSpecialAbility(SpecialAbility::MagicImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'f':
-				if (!GetSpecialAbility(IMMUNE_FLEEING))
+				if (!GetSpecialAbility(SpecialAbility::FleeingImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'O':
-				if (!GetSpecialAbility(IMMUNE_MELEE_EXCEPT_BANE))
+				if (!GetSpecialAbility(SpecialAbility::MeleeImmunityExceptBane))
 					HasAllAttacks = false;
 				break;
 			case 'W':
-				if (!GetSpecialAbility(IMMUNE_MELEE_NONMAGICAL))
+				if (!GetSpecialAbility(SpecialAbility::MeleeImmunityExceptMagical))
 					HasAllAttacks = false;
 				break;
 			case 'H':
-				if (!GetSpecialAbility(IMMUNE_AGGRO))
+				if (!GetSpecialAbility(SpecialAbility::AggroImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'G':
-				if (!GetSpecialAbility(IMMUNE_AGGRO_ON))
+				if (!GetSpecialAbility(SpecialAbility::BeingAggroImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'g':
-				if (!GetSpecialAbility(IMMUNE_CASTING_FROM_RANGE))
+				if (!GetSpecialAbility(SpecialAbility::CastingFromRangeImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'd':
-				if (!GetSpecialAbility(IMMUNE_FEIGN_DEATH))
+				if (!GetSpecialAbility(SpecialAbility::FeignDeathImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'Y':
-				if (!GetSpecialAbility(SPECATK_RANGED_ATK))
+				if (!GetSpecialAbility(SpecialAbility::RangedAttack))
 					HasAllAttacks = false;
 				break;
 			case 'L':
-				if (!GetSpecialAbility(SPECATK_INNATE_DW))
+				if (!GetSpecialAbility(SpecialAbility::DualWield))
 					HasAllAttacks = false;
 				break;
 			case 't':
-				if (!GetSpecialAbility(NPC_TUNNELVISION))
+				if (!GetSpecialAbility(SpecialAbility::TunnelVision))
 					HasAllAttacks = false;
 				break;
 			case 'n':
-				if (!GetSpecialAbility(NPC_NO_BUFFHEAL_FRIENDS))
+				if (!GetSpecialAbility(SpecialAbility::NoBuffHealFriends))
 					HasAllAttacks = false;
 				break;
 			case 'p':
-				if(!GetSpecialAbility(IMMUNE_PACIFY))
+				if(!GetSpecialAbility(SpecialAbility::PacifyImmunity))
 					HasAllAttacks = false;
 				break;
 			case 'J':
-				if(!GetSpecialAbility(LEASH))
+				if(!GetSpecialAbility(SpecialAbility::Leash))
 					HasAllAttacks = false;
 				break;
 			case 'j':
-				if(!GetSpecialAbility(TETHER))
+				if(!GetSpecialAbility(SpecialAbility::Tether))
 					HasAllAttacks = false;
 				break;
 			case 'o':
-				if(!GetSpecialAbility(DESTRUCTIBLE_OBJECT))
+				if(!GetSpecialAbility(SpecialAbility::DestructibleObject))
 				{
 					HasAllAttacks = false;
 					SetDestructibleObject(false);
 				}
 				break;
 			case 'Z':
-				if(!GetSpecialAbility(NO_HARM_FROM_CLIENT)){
+				if(!GetSpecialAbility(SpecialAbility::HarmFromClientImmunity)){
 					HasAllAttacks = false;
 				}
 				break;
 			case 'e':
-				if(!GetSpecialAbility(ALWAYS_FLEE))
+				if(!GetSpecialAbility(SpecialAbility::AlwaysFlee))
 					HasAllAttacks = false;
 				break;
 			case 'h':
-				if(!GetSpecialAbility(FLEE_PERCENT))
+				if(!GetSpecialAbility(SpecialAbility::FleePercent))
 					HasAllAttacks = false;
 				break;
 			default:
@@ -2120,6 +2205,7 @@ void NPC::FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho)
 	UpdateActiveLight();
 	ns->spawn.light = GetActiveLightType();
 	ns->spawn.show_name = NPCTypedata->show_name;
+	ns->spawn.trader = false;
 }
 
 void NPC::PetOnSpawn(NewSpawn_Struct* ns)
@@ -2149,7 +2235,7 @@ void NPC::PetOnSpawn(NewSpawn_Struct* ns)
 
 		//Not recommended if using above (However, this will work better on older clients).
 		if (RuleB(Pets, UnTargetableSwarmPet)) {
-			ns->spawn.bodytype = BT_NoTarget;
+			ns->spawn.bodytype = BodyType::NoTarget;
 		}
 
 		if (
@@ -2711,10 +2797,7 @@ void NPC::LevelScale() {
 
 uint32 NPC::GetSpawnPointID() const
 {
-	if (respawn2) {
-		return respawn2->GetID();
-	}
-	return 0;
+	return respawn2 ? respawn2->GetID() : 0;
 }
 
 void NPC::NPCSlotTexture(uint8 slot, uint32 texture)
@@ -2874,31 +2957,252 @@ void NPC::DoNPCEmote(uint8 event_, uint32 emote_id, Mob* t)
 
 bool NPC::CanTalk()
 {
-	//Races that should be able to talk. (Races up to Titanium)
-
-	uint16 TalkRace[473] =
-	{1,2,3,4,5,6,7,8,9,10,11,12,0,0,15,16,0,18,19,20,0,0,23,0,25,0,0,0,0,0,0,
-	32,0,0,0,0,0,0,39,40,0,0,0,44,0,0,0,0,49,0,51,0,53,54,55,56,57,58,0,0,0,
-	62,0,64,65,66,67,0,0,70,71,0,0,0,0,0,77,78,79,0,81,82,0,0,0,86,0,0,0,90,
-	0,92,93,94,95,0,0,98,99,0,101,0,103,0,0,0,0,0,0,110,111,112,0,0,0,0,0,0,
-	0,0,0,0,123,0,0,126,0,128,0,130,131,0,0,0,0,136,137,0,139,140,0,0,0,144,
-	0,0,0,0,0,150,151,152,153,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-	0,0,0,0,0,0,183,184,0,0,187,188,189,0,0,0,0,0,195,196,0,198,0,0,0,202,0,
-	0,205,0,0,208,0,0,0,0,0,0,0,0,217,0,219,0,0,0,0,0,0,226,0,0,229,230,0,0,
-	0,0,235,236,0,238,239,240,241,242,243,244,0,246,247,0,0,0,251,0,0,254,255,
-	256,257,0,0,0,0,0,0,0,0,266,267,0,0,270,271,0,0,0,0,0,277,278,0,0,0,0,283,
-	284,0,286,0,288,289,290,0,0,0,0,295,296,297,298,299,300,0,0,0,304,0,0,0,0,
-	0,0,0,0,0,0,0,0,0,0,0,320,0,322,323,324,325,0,0,0,0,330,331,332,333,334,335,
-	336,337,338,339,340,341,342,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,359,360,361,362,
-	0,364,365,366,0,368,369,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,385,386,0,0,0,0,0,392,
-	393,394,395,396,397,398,0,400,402,0,0,0,0,406,0,408,0,0,411,0,413,0,0,0,417,
-	0,0,420,0,0,0,0,425,0,0,0,0,0,0,0,433,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-	0,0,0,0,0,458,0,0,0,0,0,0,0,0,467,0,0,470,0,0,473};
-
-	if (TalkRace[GetRace() - 1] > 0)
-		return true;
-
-	return false;
+	switch (GetRace()) {
+		case Race::Human:
+		case Race::Barbarian:
+		case Race::Erudite:
+		case Race::WoodElf:
+		case Race::HighElf:
+		case Race::DarkElf:
+		case Race::HalfElf:
+		case Race::Dwarf:
+		case Race::Troll:
+		case Race::Ogre:
+		case Race::Halfling:
+		case Race::Gnome:
+		case Race::Werewolf:
+		case Race::Brownie:
+		case Race::Centaur:
+		case Race::Giant:
+		case Race::Trakanon:
+		case Race::VenrilSathir:
+		case Race::Kerran:
+		case Race::Fairy:
+		case Race::Ghost:
+		case Race::Gnoll:
+		case Race::Goblin:
+		case Race::FreeportGuard:
+		case Race::LavaDragon:
+		case Race::LizardMan:
+		case Race::Minotaur:
+		case Race::Orc:
+		case Race::HumanBeggar:
+		case Race::Pixie:
+		case Race::Drachnid:
+		case Race::SolusekRo:
+		case Race::Tunare:
+		case Race::Treant:
+		case Race::Vampire:
+		case Race::StatueOfRallosZek:
+		case Race::HighpassCitizen:
+		case Race::Zombie:
+		case Race::QeynosCitizen:
+		case Race::NeriakCitizen:
+		case Race::EruditeCitizen:
+		case Race::Bixie:
+		case Race::RivervaleCitizen:
+		case Race::Scarecrow:
+		case Race::Sphinx:
+		case Race::HalasCitizen:
+		case Race::GrobbCitizen:
+		case Race::OggokCitizen:
+		case Race::KaladimCitizen:
+		case Race::CazicThule:
+		case Race::ElfVampire:
+		case Race::Denizen:
+		case Race::Efreeti:
+		case Race::PhinigelAutropos:
+		case Race::Mermaid:
+		case Race::Harpy:
+		case Race::Fayguard:
+		case Race::Innoruuk:
+		case Race::Djinn:
+		case Race::InvisibleMan:
+		case Race::Iksar:
+		case Race::VahShir:
+		case Race::Sarnak:
+		case Race::Xalgoz:
+		case Race::Yeti:
+		case Race::IksarCitizen:
+		case Race::ForestGiant:
+		case Race::Burynai:
+		case Race::Erollisi:
+		case Race::Tribunal:
+		case Race::Bertoxxulous:
+		case Race::Bristlebane:
+		case Race::Ratman:
+		case Race::Coldain:
+		case Race::VeliousDragon:
+		case Race::Siren:
+		case Race::FrostGiant:
+		case Race::StormGiant:
+		case Race::BlackAndWhiteDragon:
+		case Race::GhostDragon:
+		case Race::PrismaticDragon:
+		case Race::Grimling:
+		case Race::KhatiSha:
+		case Race::Vampire2:
+		case Race::Shissar:
+		case Race::VampireVolatalis:
+		case Race::Shadel:
+		case Race::Netherbian:
+		case Race::Akhevan:
+		case Race::Wretch:
+		case Race::LordInquisitorSeru:
+		case Race::VahShirKing:
+		case Race::VahShirGuard:
+		case Race::TeleportMan:
+		case Race::Werewolf2:
+		case Race::Nymph:
+		case Race::Dryad:
+		case Race::Treant2:
+		case Race::TarewMarr:
+		case Race::SolusekRo2:
+		case Race::GuardOfJustice:
+		case Race::SolusekRoGuard:
+		case Race::BertoxxulousNew:
+		case Race::TribunalNew:
+		case Race::TerrisThule:
+		case Race::KnightOfPestilence:
+		case Race::Lepertoloth:
+		case Race::Pusling:
+		case Race::WaterMephit:
+		case Race::NightmareGoblin:
+		case Race::Karana:
+		case Race::Saryrn:
+		case Race::FenninRo:
+		case Race::SoulDevourer:
+		case Race::NewRallosZek:
+		case Race::VallonZek:
+		case Race::TallonZek:
+		case Race::AirMephit:
+		case Race::EarthMephit:
+		case Race::FireMephit:
+		case Race::NightmareMephit:
+		case Race::Zebuxoruk:
+		case Race::MithanielMarr:
+		case Race::UndeadKnight:
+		case Race::Rathe:
+		case Race::Xegony:
+		case Race::Fiend:
+		case Race::Quarm:
+		case Race::Efreeti2:
+		case Race::Valorian2:
+		case Race::AnimatedArmor:
+		case Race::UndeadFootman:
+		case Race::RallosOgre:
+		case Race::Froglok2:
+		case Race::TrollCrewMember:
+		case Race::PirateDeckhand:
+		case Race::BrokenSkullPirate:
+		case Race::PirateGhost:
+		case Race::OneArmedPirate:
+		case Race::SpiritmasterNadox:
+		case Race::BrokenSkullTaskmaster:
+		case Race::GnomePirate:
+		case Race::DarkElfPirate:
+		case Race::OgrePirate:
+		case Race::HumanPirate:
+		case Race::EruditePirate:
+		case Race::UndeadVampire:
+		case Race::Vampire3:
+		case Race::RujarkianOrc:
+		case Race::BoneGolem:
+		case Race::SandElf:
+		case Race::MasterVampire:
+		case Race::MasterOrc:
+		case Race::Mummy:
+		case Race::NewGoblin:
+		case Race::Nihil:
+		case Race::Trusik:
+		case Race::Ukun:
+		case Race::Ixt:
+		case Race::Ikaav:
+		case Race::Aneuk:
+		case Race::Kyv:
+		case Race::Noc:
+		case Race::Ratuk:
+		case Race::Huvul:
+		case Race::Mastruq:
+		case Race::MataMuram:
+		case Race::Succubus:
+		case Race::Pyrilen:
+		case Race::Dragorn:
+		case Race::Gelidran:
+		case Race::Minotaur2:
+		case Race::CrystalShard:
+		case Race::Goblin2:
+		case Race::Giant2:
+		case Race::Orc2:
+		case Race::Werewolf3:
+		case Race::Shiliskin:
+		case Race::Minotaur3:
+		case Race::Fairy2:
+		case Race::Bolvirk:
+		case Race::Elddar:
+		case Race::ForestGiant2:
+		case Race::BoneGolem2:
+		case Race::Scrykin:
+		case Race::Treant3:
+		case Race::Vampire4:
+		case Race::AyonaeRo:
+		case Race::SullonZek:
+		case Race::Bixie2:
+		case Race::Centaur2:
+		case Race::Drakkin:
+		case Race::Giant3:
+		case Race::Gnoll2:
+		case Race::GiantShade:
+		case Race::Harpy2:
+		case Race::Satyr:
+		case Race::Dynleth:
+		case Race::Kedge:
+		case Race::Kerran2:
+		case Race::Shissar2:
+		case Race::Siren2:
+		case Race::Sphinx2:
+		case Race::Human2:
+		case Race::Brownie2:
+		case Race::Exoskeleton:
+		case Race::Minotaur4:
+		case Race::Scarecrow2:
+		case Race::Wereorc:
+		case Race::ElvenGhost:
+		case Race::HumanGhost:
+		case Race::Burynai2:
+		case Race::Dracolich:
+		case Race::IksarGhost:
+		case Race::Mephit:
+		case Race::Sarnak2:
+		case Race::Gnoll3:
+		case Race::GodOfDiscord:
+		case Race::Ogre2:
+		case Race::Giant4:
+		case Race::Apexus:
+		case Race::Bellikos:
+		case Race::BrellsFirstCreation:
+		case Race::Brell:
+		case Race::Coldain2:
+		case Race::Coldain3:
+		case Race::Telmira:
+		case Race::MorellThule:
+		case Race::Amygdalan:
+		case Race::Sandman:
+		case Race::RoyalGuard:
+		case Race::CazicThule2:
+		case Race::Erudite2:
+		case Race::Alaran:
+		case Race::AlaranGhost:
+		case Race::Ratman2:
+		case Race::Akheva:
+		case Race::Luclin:
+		case Race::Luclin2:
+		case Race::Luclin3:
+		case Race::Luclin4:
+			return true;
+		default:
+			return false;
+	}
 }
 
 //this is called with 'this' as the mob being looked at, and
@@ -3009,7 +3313,7 @@ int NPC::GetScore()
         if(HasNPCSpecialAtk("S")) { spccontrib++; }    //Summon
         if(HasNPCSpecialAtk("T")) { spccontrib += 2; } //Triple
         if(HasNPCSpecialAtk("Q")) { spccontrib += 3; } //Quad
-        if(HasNPCSpecialAtk("U")) { spccontrib += 5; } //Unslowable
+        if(HasNPCSpecialAtk("U")) { spccontrib += 5; } //SpecialAbility::SlowImmunity
         if(HasNPCSpecialAtk("L")) { spccontrib++; }    //Innate Dual Wield
     }
 
@@ -3039,16 +3343,28 @@ uint32 NPC::GetSpawnKillCount()
 	return(0);
 }
 
-void NPC::DoQuestPause(Mob *other) {
-	if(IsMoving() && !IsOnHatelist(other)) {
-		PauseWandering(RuleI(NPC, SayPauseTimeInSec));
-		if (other && !other->sneaking)
-			FaceTarget(other);
-	} else if(!IsMoving()) {
-		if (other && !other->sneaking && GetAppearance() != eaSitting && GetAppearance() != eaDead)
-			FaceTarget(other);
+void NPC::DoQuestPause(Mob* m)
+{
+	if (!m) {
+		return;
 	}
 
+	if (IsMoving() && !IsOnHatelist(m)) {
+		PauseWandering(RuleI(NPC, SayPauseTimeInSec));
+
+		if (FacesTarget() && !m->sneaking) {
+			FaceTarget(m);
+		}
+	} else if (!IsMoving()) {
+		if (
+			FacesTarget() &&
+			!m->sneaking &&
+			GetAppearance() != eaSitting &&
+			GetAppearance() != eaDead
+		) {
+			FaceTarget(m);
+		}
+	}
 }
 
 void NPC::ChangeLastName(std::string last_name)
@@ -3243,7 +3559,7 @@ bool NPC::AICheckCloseBeneficialSpells(
 		return false;
 	}
 
-	if (caster->GetSpecialAbility(NPC_NO_BUFFHEAL_FRIENDS)) {
+	if (caster->GetSpecialAbility(SpecialAbility::NoBuffHealFriends)) {
 		return false;
 	}
 
@@ -3264,7 +3580,7 @@ bool NPC::AICheckCloseBeneficialSpells(
 	/**
 	 * Check through close range mobs
 	 */
-	for (auto & close_mob : entity_list.GetCloseMobList(caster, cast_range)) {
+	for (auto & close_mob : caster->GetCloseMobList(cast_range)) {
 		Mob *mob = close_mob.second;
 		if (!mob) {
 			continue;
@@ -3343,8 +3659,8 @@ void NPC::AIYellForHelp(Mob *sender, Mob *attacker)
 		GetID()
 	);
 
-	for (auto &close_mob : entity_list.GetCloseMobList(sender)) {
-		Mob   *mob     = close_mob.second;
+	for (auto &close_mob: sender->GetCloseMobList()) {
+		Mob *mob = close_mob.second;
 		if (!mob) {
 			continue;
 		}
@@ -3396,7 +3712,7 @@ void NPC::AIYellForHelp(Mob *sender, Mob *attacker)
 			&& mob != attacker
 			&& mob->GetPrimaryFaction() != 0
 			&& !mob->IsEngaged()
-			&& ((!mob->IsPet()) || (mob->IsPet() && mob->GetOwner() && !mob->GetOwner()->IsClient()))
+			&& ((!mob->IsPet()) || (mob->IsPet() && mob->GetOwner() && !mob->GetOwner()->IsOfClientBot()))
 			) {
 
 			/**
@@ -3554,13 +3870,12 @@ int NPC::GetRolledItemCount(uint32 item_id)
 
 void NPC::SendPositionToClients()
 {
-	auto      p  = new EQApplicationPacket(OP_ClientUpdate, sizeof(PlayerPositionUpdateServer_Struct));
-	auto      *s = (PlayerPositionUpdateServer_Struct *) p->pBuffer;
+	static EQApplicationPacket p(OP_ClientUpdate, sizeof(PlayerPositionUpdateServer_Struct));
+	auto      *s = (PlayerPositionUpdateServer_Struct *) p.pBuffer;
 	for (auto &c: entity_list.GetClientList()) {
 		MakeSpawnUpdate(s);
-		c.second->QueuePacket(p, false);
+		c.second->QueuePacket(&p, false);
 	}
-	safe_delete(p);
 }
 
 void NPC::HandleRoambox()
@@ -3751,56 +4066,56 @@ void NPC::DescribeSpecialAbilities(Client* c)
 
 	// These abilities are simple on/off flags
 	static const std::vector<uint32> toggleable_special_abilities = {
-		SPECATK_TRIPLE,
-		SPECATK_QUAD,
-		SPECATK_INNATE_DW,
-		SPECATK_BANE,
-		SPECATK_MAGICAL,
-		UNSLOWABLE,
-		UNMEZABLE,
-		UNCHARMABLE,
-		UNSTUNABLE,
-		UNSNAREABLE,
-		UNFEARABLE,
-		UNDISPELLABLE,
-		IMMUNE_MELEE,
-		IMMUNE_MAGIC,
-		IMMUNE_FLEEING,
-		IMMUNE_MELEE_EXCEPT_BANE,
-		IMMUNE_MELEE_NONMAGICAL,
-		IMMUNE_AGGRO,
-		IMMUNE_AGGRO_ON,
-		IMMUNE_CASTING_FROM_RANGE,
-		IMMUNE_FEIGN_DEATH,
-		IMMUNE_TAUNT,
-		NPC_NO_BUFFHEAL_FRIENDS,
-		IMMUNE_PACIFY,
-		DESTRUCTIBLE_OBJECT,
-		NO_HARM_FROM_CLIENT,
-		ALWAYS_FLEE,
-		ALLOW_BENEFICIAL,
-		DISABLE_MELEE,
-		ALLOW_TO_TANK,
-		IGNORE_ROOT_AGGRO_RULES,
-		PROX_AGGRO,
-		IMMUNE_RANGED_ATTACKS,
-		IMMUNE_DAMAGE_CLIENT,
-		IMMUNE_DAMAGE_NPC,
-		IMMUNE_AGGRO_CLIENT,
-		IMMUNE_AGGRO_NPC,
-		IMMUNE_FADING_MEMORIES,
-		IMMUNE_OPEN,
-		IMMUNE_ASSASSINATE,
-		IMMUNE_HEADSHOT,
-		IMMUNE_AGGRO_BOT,
-		IMMUNE_DAMAGE_BOT
+		SpecialAbility::TripleAttack,
+		SpecialAbility::QuadrupleAttack,
+		SpecialAbility::DualWield,
+		SpecialAbility::BaneAttack,
+		SpecialAbility::MagicalAttack,
+		SpecialAbility::SlowImmunity,
+		SpecialAbility::MesmerizeImmunity,
+		SpecialAbility::CharmImmunity,
+		SpecialAbility::StunImmunity,
+		SpecialAbility::SnareImmunity,
+		SpecialAbility::FearImmunity,
+		SpecialAbility::DispellImmunity,
+		SpecialAbility::MeleeImmunity,
+		SpecialAbility::MagicImmunity,
+		SpecialAbility::FleeingImmunity,
+		SpecialAbility::MeleeImmunityExceptBane,
+		SpecialAbility::MeleeImmunityExceptMagical,
+		SpecialAbility::AggroImmunity,
+		SpecialAbility::BeingAggroImmunity,
+		SpecialAbility::CastingFromRangeImmunity,
+		SpecialAbility::FeignDeathImmunity,
+		SpecialAbility::TauntImmunity,
+		SpecialAbility::NoBuffHealFriends,
+		SpecialAbility::PacifyImmunity,
+		SpecialAbility::DestructibleObject,
+		SpecialAbility::HarmFromClientImmunity,
+		SpecialAbility::AlwaysFlee,
+		SpecialAbility::AllowBeneficial,
+		SpecialAbility::DisableMelee,
+		SpecialAbility::AllowedToTank,
+		SpecialAbility::IgnoreRootAggroRules,
+		SpecialAbility::ProximityAggro,
+		SpecialAbility::RangedAttackImmunity,
+		SpecialAbility::ClientDamageImmunity,
+		SpecialAbility::NPCDamageImmunity,
+		SpecialAbility::ClientAggroImmunity,
+		SpecialAbility::NPCAggroImmunity,
+		SpecialAbility::MemoryFadeImmunity,
+		SpecialAbility::OpenImmunity,
+		SpecialAbility::AssassinateImmunity,
+		SpecialAbility::HeadshotImmunity,
+		SpecialAbility::BotAggroImmunity,
+		SpecialAbility::BotDamageImmunity
 	};
 
 	// These abilities have parameters that need to be parsed out individually
 	static const std::map<uint32, std::vector<std::string>> parameter_special_abilities = {
-		{ SPECATK_SUMMON, { "Cooldown in Milliseconds", "Health Percentage" } },
+		{ SpecialAbility::Summon, { "Cooldown in Milliseconds", "Health Percentage" } },
 		{
-			SPECATK_ENRAGE,
+			SpecialAbility::Enrage,
 			{
 				"Health Percentage",
 				"Duration in Milliseconds",
@@ -3808,7 +4123,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			}
 		},
 		{
-			SPECATK_RAMPAGE,
+			SpecialAbility::Rampage,
 			{
 				"Chance",
 				"Targets",
@@ -3820,7 +4135,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			}
 		},
 		{
-			SPECATK_AREA_RAMPAGE,
+			SpecialAbility::AreaRampage,
 			{
 				"Targets",
 				"Normal Attack Damage Percentage",
@@ -3832,7 +4147,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			}
 		},
 		{
-			SPECATK_FLURRY,
+			SpecialAbility::Flurry,
 			{
 				"Attacks",
 				"Normal Attack Damage Percentage",
@@ -3844,7 +4159,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			}
 		},
 		{
-			SPECATK_RANGED_ATK,
+			SpecialAbility::RangedAttack,
 			{
 				"Attacks",
 				"Maximum Range",
@@ -3853,21 +4168,21 @@ void NPC::DescribeSpecialAbilities(Client* c)
 				"Minimum Range"
 			}
 		},
-		{ NPC_TUNNELVISION, { "Aggro Modifier on Non-Tanks" } },
-		{ LEASH, { "Range" } },
-		{ TETHER, { "Range" } },
-		{ FLEE_PERCENT, { "Health Percentage", "Chance" } },
+		{ SpecialAbility::TunnelVision, { "Aggro Modifier on Non-Tanks" } },
+		{ SpecialAbility::Leash, { "Range" } },
+		{ SpecialAbility::Tether, { "Range" } },
+		{ SpecialAbility::FleePercent, { "Health Percentage", "Chance" } },
 		{
-			NPC_CHASE_DISTANCE,
+			SpecialAbility::NPCChaseDistance,
 			{
 				"Maximum Distance",
 				"Minimum Distance",
 				"Ignore Line of Sight"
 			}
 		},
-		{ CASTING_RESIST_DIFF, { "Resist Difficulty Value" } },
+		{ SpecialAbility::CastingResistDifficulty, { "Resist Difficulty Value" } },
 		{
-			COUNTER_AVOID_DAMAGE,
+			SpecialAbility::CounterAvoidDamage,
 			{
 				"Reduction Percentage for Block, Dodge, Parry, and Riposte",
 				"Reduction Percentage for Riposte",
@@ -3877,7 +4192,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			}
 		},
 		{
-			MODIFY_AVOID_DAMAGE,
+			SpecialAbility::ModifyAvoidDamage,
 			{
 				"Addition Percentage for Block, Dodge, Parry, and Riposte",
 				"Addition Percentage for Riposte",
@@ -3895,7 +4210,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 			messages.emplace_back(
 				fmt::format(
 					"{} ({})",
-					EQ::constants::GetSpecialAbilityName(e),
+					SpecialAbility::GetName(e),
 					e
 				)
 			);
@@ -3912,7 +4227,7 @@ void NPC::DescribeSpecialAbilities(Client* c)
 				messages.emplace_back(
 					fmt::format(
 						"{} ({}) | {}: {}",
-						EQ::constants::GetSpecialAbilityName(e.first),
+						SpecialAbility::GetName(e.first),
 						e.first,
 						a,
 						GetSpecialAbilityParam(e.first, slot_id)
@@ -3955,4 +4270,692 @@ void NPC::DescribeSpecialAbilities(Client* c)
 	for (const auto& e : messages) {
 		c->Message(Chat::White, e.c_str());
 	}
+}
+
+void NPC::DoNpcToNpcAggroScan()
+{
+	for (auto &close_mob : GetCloseMobList(GetAggroRange())) {
+		Mob *mob = close_mob.second;
+		if (!mob) {
+			continue;
+		}
+
+		if (!mob->IsNPC()) {
+			continue;
+		}
+
+		if (CheckWillAggro(mob)) {
+			AddToHateList(mob);
+		}
+	}
+
+	AI_scan_area_timer->Disable();
+	AI_scan_area_timer->Start(
+		RandomTimer(RuleI(NPC, NPCToNPCAggroTimerMin), RuleI(NPC, NPCToNPCAggroTimerMax)),
+		false
+	);
+}
+
+bool NPC::FacesTarget()
+{
+	const std::string& excluded_races_rule = RuleS(NPC, ExcludedFaceTargetRaces);
+
+	if (excluded_races_rule.empty()) {
+		return true;
+	}
+
+	const auto& v = Strings::Split(excluded_races_rule, ",");
+
+	return std::find(v.begin(), v.end(), std::to_string(GetBaseRace())) == v.end();
+}
+
+bool NPC::CanPetTakeItem(const EQ::ItemInstance *inst)
+{
+	if (!inst) {
+		return false;
+	}
+
+	if (!IsPetOwnerOfClientBot() && !IsCharmedPet()) {
+		return false;
+	}
+
+	const bool can_take_nodrop = (RuleB(Pets, CanTakeNoDrop) || inst->GetItem()->NoDrop != 0)
+								 || inst->GetItem()->NoRent == 0;
+
+	const bool is_charmed_with_attuned = IsCharmed() && inst->IsAttuned();
+
+	auto o = GetOwner() && GetOwner()->IsClient() ? GetOwner()->CastToClient() : nullptr;
+
+	struct Check {
+		bool condition;
+		std::string message;
+	};
+
+	const Check checks[] = {
+		{inst->IsAttuned(), "I cannot equip attuned items, master."},
+		{!can_take_nodrop || is_charmed_with_attuned, "I cannot equip no-drop items, master."},
+		{inst->GetItem()->IsQuestItem(), "I cannot equip quest items, master."},
+		{!inst->GetItem()->IsPetUsable(), "I cannot equip that item, master."}
+	};
+
+	// Iterate over checks and return false if any condition is true
+	for (const auto &c : checks) {
+		if (c.condition) {
+			if (o) {
+				o->Message(Chat::PetResponse, fmt::format("{} says '{}'", GetCleanName(), c.message).c_str());
+			}
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool NPC::IsGuildmasterForClient(Client *c) {
+	std::map<uint8, uint8> guildmaster_map = {
+		{ Class::Warrior, Class::WarriorGM },
+		{ Class::Cleric, Class::ClericGM },
+		{ Class::Paladin, Class::PaladinGM },
+		{ Class::Ranger, Class::RangerGM },
+		{ Class::ShadowKnight, Class::ShadowKnightGM },
+		{ Class::Druid, Class::DruidGM },
+		{ Class::Monk, Class::MonkGM },
+		{ Class::Bard, Class::BardGM },
+		{ Class::Rogue, Class::RogueGM },
+		{ Class::Shaman, Class::ShamanGM },
+		{ Class::Necromancer, Class::NecromancerGM },
+		{ Class::Wizard, Class::WizardGM },
+		{ Class::Magician, Class::MagicianGM },
+		{ Class::Enchanter, Class::EnchanterGM },
+		{ Class::Beastlord, Class::BeastlordGM },
+		{ Class::Berserker, Class::BerserkerGM },
+	};
+
+	if (guildmaster_map.find(c->GetClass()) != guildmaster_map.end()) {
+		if (guildmaster_map[c->GetClass()] == GetClass()) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool NPC::CheckHandin(
+	Client *c,
+	std::map<std::string, uint32> handin,
+	std::map<std::string, uint32> required,
+	std::vector<EQ::ItemInstance *> items
+)
+{
+	auto h = Handin{};
+	auto r = Handin{};
+
+	std::string log_handin_prefix = fmt::format("[{}] -> [{}]", c->GetCleanName(), GetCleanName());
+
+	// if the npc is a multi-quest npc, we want to re-use our previously set hand-in bucket
+	if (!m_handin_started && IsMultiQuestEnabled()) {
+		h = m_hand_in;
+	}
+
+	if (IsMultiQuestEnabled()) {
+		LogNpcHandin("{} Multi-Quest hand-in enabled", log_handin_prefix);
+	}
+
+	std::vector<std::pair<const std::map<std::string, uint32>&, Handin&>> datasets = {};
+
+	// if we've already started the hand-in process, we don't want to re-process the hand-in data
+	// we continue to use the originally set hand-in bucket and decrement from it with each successive hand-in
+	if (m_handin_started) {
+		h = m_hand_in;
+	} else {
+		datasets.emplace_back(handin, h);
+	}
+	datasets.emplace_back(required, r);
+
+	const std::string set_hand_in  = "Hand-in";
+	const std::string set_required = "Required";
+	for (const auto &[data_map, current_handin]: datasets) {
+		std::string current_dataset = &current_handin == &h ? set_hand_in : set_required;
+		for (const auto &[key, value]: data_map) {
+			LogNpcHandinDetail("Processing [{}] key [{}] value [{}]", current_dataset, key, value);
+
+			// Handle items
+			if (Strings::IsNumber(key)) {
+				if (const auto *exists = database.GetItem(Strings::ToUnsignedInt(key));
+					exists && current_dataset == set_required) {
+					current_handin.items.emplace_back(HandinEntry{.item_id = key, .count = value});
+				}
+				continue;
+			}
+
+			// Handle money and any other key-value pairs
+			if (key == "platinum") { current_handin.money.platinum = value; }
+			else if (key == "gold") { current_handin.money.gold = value; }
+			else if (key == "silver") { current_handin.money.silver = value; }
+			else if (key == "copper") { current_handin.money.copper = value; }
+		}
+	}
+
+	// pull hand-in items from the item instances
+	if (!m_handin_started) {
+		for (const auto &i: items) {
+			if (!i) {
+				continue;
+			}
+
+			h.items.emplace_back(
+				HandinEntry{
+					.item_id = std::to_string(i->GetItem()->ID),
+					.count = std::max(static_cast<uint16>(i->IsStackable() ? i->GetCharges() : 1), static_cast<uint16>(1)),
+					.item = i->Clone(),
+					.is_multiquest_item = false
+				}
+			);
+		}
+	}
+
+	// compare hand-in to required, the item_id can be in any slot
+	bool requirement_met = true;
+
+	// money
+	bool money_met = h.money.platinum == r.money.platinum
+					 && h.money.gold == r.money.gold
+					 && h.money.silver == r.money.silver
+					 && h.money.copper == r.money.copper;
+
+	// if we started the hand-in process, we want to use the hand-in items from the member variable hand-in bucket
+	auto &handin_items = !m_handin_started ? h.items : m_hand_in.items;
+
+	for (auto &h_item: h.items) {
+		LogNpcHandinDetail(
+			"{} Hand-in item [{}] ({}) count [{}] is_multiquest_item [{}]",
+			log_handin_prefix,
+			h_item.item->GetItem()->Name,
+			h_item.item_id,
+			h_item.count,
+			h_item.is_multiquest_item
+		);
+	}
+
+	// remove items from the hand-in bucket that were used to fulfill the requirement
+	std::vector<HandinEntry> items_to_remove;
+
+	// multi-quest
+	if (IsMultiQuestEnabled()) {
+		for (auto &h_item: m_hand_in.items) {
+			for (const auto &r_item: r.items) {
+				if (h_item.item_id == r_item.item_id && h_item.count == r_item.count) {
+					h_item.is_multiquest_item = true;
+				}
+			}
+		}
+	}
+
+	// check if the hand-in items fulfill the requirement
+	bool items_met = true;
+	if (!handin_items.empty() && !r.items.empty()) {
+		std::vector<HandinEntry> before_handin_state = handin_items;
+		for (const auto &r_item : r.items) {
+			uint32 remaining_requirement = r_item.count;
+			bool fulfilled = false;
+
+			// Process the hand-in items using a standard for loop
+			for (size_t i = 0; i < handin_items.size() && remaining_requirement > 0; ++i) {
+				auto &h_item = handin_items[i];
+
+				// Check if the item IDs match (normalize if necessary)
+				bool id_match = (h_item.item_id == r_item.item_id);
+
+				if (id_match) {
+					uint32 used_count = std::min(remaining_requirement, h_item.count);
+					// If the item is a multi-quest item, we don't want to consume it for the hand-in bucket
+					if (!IsMultiQuestEnabled()) {
+						h_item.count -= used_count;
+					}
+					remaining_requirement -= used_count;
+
+					LogNpcHandinDetail(
+						"{} >>>> Using item [{}] ({}) count [{}] to fulfill [{}], remaining requirement [{}]",
+						log_handin_prefix,
+						h_item.item->GetItem()->Name,
+						h_item.item_id,
+						used_count,
+						r_item.item_id,
+						remaining_requirement
+					);
+
+					// If the item is fully consumed, mark it for removal
+					if (h_item.count == 0) {
+						items_to_remove.push_back(h_item);
+					}
+				}
+			}
+
+			// If we cannot fulfill the requirement, mark as not met
+			if (remaining_requirement > 0) {
+				LogNpcHandinDetail(
+					"{} >>>> Failed to fulfill requirement for [{}], remaining [{}]",
+					log_handin_prefix,
+					r_item.item_id,
+					remaining_requirement
+				);
+				items_met = false;
+				break;
+			} else {
+				fulfilled = true;
+			}
+		}
+
+		// reset the hand-in items to the state prior to processing the hand-in
+		// if we failed to fulfill the requirement
+		if (!items_met) {
+			handin_items = before_handin_state;
+			items_to_remove.clear();
+		}
+	}
+	else if (h.items.empty() && r.items.empty()) { // no items required, money only
+		items_met = true;
+	}
+	else {
+		items_met = false;
+	}
+
+	requirement_met = money_met && items_met;
+
+	// in-case we trigger CheckHand-in multiple times, only set these once
+	if (!m_handin_started) {
+		m_handin_started  = true;
+		m_hand_in         = h;
+		// save original items for logging
+		m_hand_in.original_items = m_hand_in.items;
+		m_hand_in.original_money = m_hand_in.money;
+	}
+
+	// check if npc is guildmaster
+	if (IsGuildmaster()) {
+		for (const auto &remove_item : items_to_remove) {
+			if (!remove_item.item) {
+				continue;
+			}
+
+			if (!IsDisciplineTome(remove_item.item->GetItem())) {
+				continue;
+			}
+
+			if (IsGuildmasterForClient(c)) {
+				c->TrainDiscipline(remove_item.item->GetID());
+				m_hand_in.items.erase(
+					std::remove_if(
+						m_hand_in.items.begin(),
+						m_hand_in.items.end(),
+						[&](const HandinEntry &i) {
+							bool removed = i.item == remove_item.item;
+							if (removed) {
+								LogNpcHandin(
+									"{} Hand-in success, removing discipline tome [{}] from hand-in bucket",
+									log_handin_prefix,
+									i.item_id
+								);
+							}
+							return removed;
+						}
+					),
+					m_hand_in.items.end()
+				);
+			} else {
+				Say("You are not a member of my guild. I will not train you!");
+				requirement_met = false;
+				break;
+			}
+		}
+	}
+
+	// print current hand-in bucket
+	LogNpcHandin(
+		"{} > Before processing hand-in | requirement_met [{}] item_count [{}] platinum [{}] gold [{}] silver [{}] copper [{}]",
+		log_handin_prefix,
+		requirement_met,
+		h.items.size(),
+		h.money.platinum,
+		h.money.gold,
+		h.money.silver,
+		h.money.copper
+	);
+
+	LogNpcHandin(
+		"{} >> Handed Items | Item(s) ({}) platinum [{}] gold [{}] silver [{}] copper [{}]",
+		log_handin_prefix,
+		h.items.size(),
+		h.money.platinum,
+		h.money.gold,
+		h.money.silver,
+		h.money.copper
+	);
+
+	int item_count = 1;
+	for (const auto &i: h.items) {
+		LogNpcHandin(
+			"{} >>> item{} [{}] ({}) count [{}]",
+			log_handin_prefix,
+			item_count,
+			i.item->GetItem()->Name,
+			i.item_id,
+			i.count
+		);
+		item_count++;
+	}
+
+	LogNpcHandin(
+		"{} >> Required Items | Item(s) ({}) platinum [{}] gold [{}] silver [{}] copper [{}]",
+		log_handin_prefix,
+		r.items.size(),
+		r.money.platinum,
+		r.money.gold,
+		r.money.silver,
+		r.money.copper
+	);
+
+	item_count = 1;
+	for (const auto &i: r.items) {
+		auto item = database.GetItem(Strings::ToUnsignedInt(i.item_id));
+
+		LogNpcHandin(
+			"{} >>> item{} [{}] ({}) count [{}]",
+			log_handin_prefix,
+			item_count,
+			item ? item->Name : "Unknown",
+			i.item_id,
+			i.count
+		);
+
+		item_count++;
+	}
+
+	if (requirement_met) {
+		std::vector<std::string> log_entries = {};
+		for (const auto &remove_item: items_to_remove) {
+			m_hand_in.items.erase(
+				std::remove_if(
+					m_hand_in.items.begin(),
+					m_hand_in.items.end(),
+					[&](const HandinEntry &i) {
+						bool removed = (remove_item.item == i.item);
+						if (removed) {
+							log_entries.emplace_back(
+								fmt::format(
+									"{} >>> Hand-in success | Removing from hand-in bucket | item [{}] ({}) count [{}]",
+									log_handin_prefix,
+									i.item->GetItem()->Name,
+									i.item_id,
+									i.count
+								)
+							);
+						}
+						return removed;
+					}
+				),
+				m_hand_in.items.end()
+			);
+		}
+
+		// log successful hand-in items
+		if (!log_entries.empty()) {
+			for (const auto& log : log_entries) {
+				LogNpcHandin("{}", log);
+			}
+		}
+
+		// decrement successful hand-in money from current hand-in bucket
+		if (h.money.platinum > 0 || h.money.gold > 0 || h.money.silver > 0 || h.money.copper > 0) {
+			LogNpcHandin(
+				"{} Hand-in success, removing money p [{}] g [{}] s [{}] c [{}]",
+				log_handin_prefix,
+				h.money.platinum,
+				h.money.gold,
+				h.money.silver,
+				h.money.copper
+			);
+			m_hand_in.money.platinum -= h.money.platinum;
+			m_hand_in.money.gold -= h.money.gold;
+			m_hand_in.money.silver -= h.money.silver;
+			m_hand_in.money.copper -= h.money.copper;
+		}
+
+		LogNpcHandin(
+			"{} > End of hand-in | requirement_met [{}] item_count [{}] platinum [{}] gold [{}] silver [{}] copper [{}]",
+			log_handin_prefix,
+			requirement_met,
+			m_hand_in.items.size(),
+			m_hand_in.money.platinum,
+			m_hand_in.money.gold,
+			m_hand_in.money.silver,
+			m_hand_in.money.copper
+		);
+		for (const auto &i: m_hand_in.items) {
+			LogNpcHandin(
+				"{} Hand-in success, item [{}] ({}) count [{}]",
+				log_handin_prefix,
+				i.item->GetItem()->Name,
+				i.item_id,
+				i.count
+			);
+		}
+	}
+
+	// when we meet requirements under multi-quest, we want to reset the hand-in bucket
+	if (requirement_met && IsMultiQuestEnabled()) {
+		ResetMultiQuest();
+	}
+
+	return requirement_met;
+}
+
+NPC::Handin NPC::ReturnHandinItems(Client *c)
+{
+	// player event
+	std::vector<PlayerEvent::HandinEntry> handin_items;
+	PlayerEvent::HandinMoney              handin_money{};
+	std::vector<PlayerEvent::HandinEntry> return_items;
+	PlayerEvent::HandinMoney              return_money{};
+	for (const auto& i : m_hand_in.original_items) {
+		if (i.item && i.item->GetItem()) {
+			handin_items.emplace_back(
+				PlayerEvent::HandinEntry{
+					.item_id = i.item->GetID(),
+					.item_name = i.item->GetItem()->Name,
+					.augment_ids = i.item->GetAugmentIDs(),
+					.augment_names = i.item->GetAugmentNames(),
+					.charges = std::max(static_cast<uint16>(i.item->GetCharges()), static_cast<uint16>(1))
+				}
+			);
+		}
+	}
+
+	auto returned = m_hand_in;
+
+	// check if any money was handed in
+	if (m_hand_in.original_money.platinum > 0 ||
+		m_hand_in.original_money.gold > 0 ||
+		m_hand_in.original_money.silver > 0 ||
+		m_hand_in.original_money.copper > 0
+		) {
+		handin_money.copper   = m_hand_in.original_money.copper;
+		handin_money.silver   = m_hand_in.original_money.silver;
+		handin_money.gold     = m_hand_in.original_money.gold;
+		handin_money.platinum = m_hand_in.original_money.platinum;
+	}
+
+	// if scripts have their own implementation of returning items instead of
+	// going through return_items, this guards against returning items twice (duplicate items)
+	bool external_returned_items = c->GetExternalHandinItemsReturned().size() > 0;
+	bool returned_items_already = false;
+	for (auto &handin_item: m_hand_in.items) {
+		for (auto &i: c->GetExternalHandinItemsReturned()) {
+			auto item = database.GetItem(i);
+			if (item && std::to_string(item->ID) == handin_item.item_id) {
+				LogNpcHandin(" -- External quest methods already returned item [{}] ({})", item->Name, item->ID);
+				returned_items_already = true;
+			}
+		}
+	}
+
+	if (returned_items_already) {
+		LogNpcHandin("External quest methods returned items, not returning items to player via ReturnHandinItems");
+	}
+
+	bool returned_handin = false;
+	m_hand_in.items.erase(
+		std::remove_if(
+			m_hand_in.items.begin(),
+			m_hand_in.items.end(),
+			[&](HandinEntry &i) {
+				if (i.item && i.item->GetItem() && !i.is_multiquest_item && !returned_items_already) {
+					return_items.emplace_back(
+						PlayerEvent::HandinEntry{
+							.item_id = i.item->GetID(),
+							.item_name = i.item->GetItem()->Name,
+							.augment_ids = i.item->GetAugmentIDs(),
+							.augment_names = i.item->GetAugmentNames(),
+							.charges = std::max(static_cast<uint16>(i.item->GetCharges()), static_cast<uint16>(1))
+						}
+					);
+
+					// If the item is stackable and the new charges don't match the original count
+					// set the charges to the original count
+					if (i.item->IsStackable() && i.item->GetCharges() != i.count) {
+						i.item->SetCharges(i.count);
+					}
+
+					c->PushItemOnCursor(*i.item, true);
+					LogNpcHandin(
+						"Hand-in failed, returning item [{}] i.is_multiquest_item [{}]",
+						i.item->GetItem()->Name,
+						i.is_multiquest_item
+					);
+
+					returned_handin = true;
+					return true; // Mark this item for removal
+				}
+				return false;
+			}
+		),
+		m_hand_in.items.end()
+	);
+
+	// check if any money was handed in via external quest methods
+	auto em = c->GetExternalHandinMoneyReturned();
+
+	bool money_returned_via_external_quest_methods =
+			 em.copper > 0 ||
+			 em.silver > 0 ||
+			 em.gold > 0 ||
+			 em.platinum > 0;
+
+	// check if any money was handed in
+	bool money_handed = m_hand_in.money.platinum > 0 ||
+						m_hand_in.money.gold > 0 ||
+						m_hand_in.money.silver > 0 ||
+						m_hand_in.money.copper > 0;
+	if (money_handed && !money_returned_via_external_quest_methods) {
+		c->AddMoneyToPP(
+			m_hand_in.money.copper,
+			m_hand_in.money.silver,
+			m_hand_in.money.gold,
+			m_hand_in.money.platinum,
+			true
+		);
+		returned_handin = true;
+		LogNpcHandin(
+			"Hand-in failed, returning money p [{}] g [{}] s [{}] c [{}]",
+			m_hand_in.money.platinum,
+			m_hand_in.money.gold,
+			m_hand_in.money.silver,
+			m_hand_in.money.copper
+		);
+
+		// player event
+		return_money.copper   = m_hand_in.money.copper;
+		return_money.silver   = m_hand_in.money.silver;
+		return_money.gold     = m_hand_in.money.gold;
+		return_money.platinum = m_hand_in.money.platinum;
+
+		// if multi-quest and we returned money, reset the hand-in bucket
+		if (IsMultiQuestEnabled()) {
+			m_hand_in.money = {};
+			m_hand_in.original_money = {};
+		}
+	}
+
+	if (money_returned_via_external_quest_methods) {
+		LogNpcHandin(
+			"Money handed in was returned via external quest methods, not returning money to player via ReturnHandinItems | handed-in p [{}] g [{}] s [{}] c [{}] returned-external p [{}] g [{}] s [{}] c [{}] source [{}]",
+			m_hand_in.money.platinum,
+			m_hand_in.money.gold,
+			m_hand_in.money.silver,
+			m_hand_in.money.copper,
+			em.platinum,
+			em.gold,
+			em.silver,
+			em.copper,
+			em.return_source
+		);
+	}
+
+	m_has_processed_handin_return = returned_handin;
+
+	if (returned_handin) {
+		Say(
+			fmt::format(
+				"I have no need for this {}, you can have it back.",
+				c->GetCleanName()
+			).c_str()
+		);
+	}
+
+	const bool handed_in_money = (
+		handin_money.platinum > 0 ||
+		handin_money.gold > 0 ||
+		handin_money.silver > 0 ||
+		handin_money.copper > 0
+	);
+	const bool event_has_data_to_record = !handin_items.empty() || handed_in_money;
+
+	if (player_event_logs.IsEventEnabled(PlayerEvent::NPC_HANDIN) && event_has_data_to_record) {
+		auto e = PlayerEvent::HandinEvent{
+			.npc_id = GetNPCTypeID(),
+			.npc_name = GetCleanName(),
+			.handin_items = handin_items,
+			.handin_money = handin_money,
+			.return_items = return_items,
+			.return_money = return_money,
+			.is_quest_handin = parse->HasQuestSub(GetNPCTypeID(), EVENT_TRADE)
+		};
+
+		RecordPlayerEventLogWithClient(c, PlayerEvent::NPC_HANDIN, e);
+	}
+
+	return returned;
+}
+
+void NPC::ResetHandin()
+{
+	LogNpcHandin("Resetting hand-in bucket for [{}]", GetCleanName());
+	m_has_processed_handin_return = false;
+	m_handin_started              = false;
+	if (!IsMultiQuestEnabled()) {
+		for (auto &i: m_hand_in.original_items) {
+			safe_delete(i.item);
+		}
+
+		m_hand_in = {};
+	}
+}
+
+void NPC::ResetMultiQuest() {
+	LogNpcHandin("Resetting multi-quest hand-in bucket for [{}]", GetCleanName());
+	for (auto &i: m_hand_in.original_items) {
+		safe_delete(i.item);
+	}
+
+	m_hand_in = {};
 }

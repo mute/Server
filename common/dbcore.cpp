@@ -7,6 +7,7 @@
 #include "timer.h"
 
 #include "dbcore.h"
+#include "mysql_stmt.h"
 
 #include <fstream>
 #include <iostream>
@@ -301,7 +302,9 @@ std::string DBcore::Escape(const std::string& s)
 
 void DBcore::SetMutex(Mutex *mutex)
 {
-	safe_delete(m_mutex);
+	if (m_mutex && m_mutex != mutex) {
+		safe_delete(m_mutex);
+	}
 
 	DBcore::m_mutex = mutex;
 }
@@ -435,4 +438,9 @@ MySQLRequestResult DBcore::QueryDatabaseMulti(const std::string &query)
 	SetMultiStatementsOff();
 
 	return r;
+}
+
+mysql::PreparedStmt DBcore::Prepare(std::string query)
+{
+	return mysql::PreparedStmt(*mysql, std::move(query), m_mutex);
 }

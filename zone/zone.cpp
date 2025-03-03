@@ -36,7 +36,7 @@
 #include "../common/strings.h"
 #include "../common/eqemu_logsys.h"
 
-#include "expedition.h"
+#include "dynamic_zone.h"
 #include "guild_mgr.h"
 #include "map.h"
 #include "npc.h"
@@ -64,10 +64,13 @@
 #include "../common/repositories/ldon_trap_templates_repository.h"
 #include "../common/repositories/respawn_times_repository.h"
 #include "../common/repositories/npc_emotes_repository.h"
+#include "../common/repositories/zone_state_spawns_repository.h"
 #include "../common/serverinfo.h"
 #include "../common/repositories/merc_stance_entries_repository.h"
 #include "../common/repositories/alternate_currency_repository.h"
 #include "../common/repositories/graveyard_repository.h"
+#include "../common/repositories/trader_repository.h"
+#include "../common/repositories/buyer_repository.h"
 
 #include <time.h>
 
@@ -107,9 +110,6 @@ bool Zone::Bootup(uint32 iZoneID, uint32 iInstanceID, bool is_static) {
 
 	numclients = 0;
 	zone = new Zone(iZoneID, iInstanceID, zonename);
-
-	parse->Init();
-	parse->ReloadQuests(true);
 
 	//init the zone, loads all the data, etc
 	if (!zone->Init(is_static)) {
@@ -172,6 +172,8 @@ bool Zone::Bootup(uint32 iZoneID, uint32 iInstanceID, bool is_static) {
 
 	zone->RequestUCSServerStatus();
 	zone->StartShutdownTimer();
+
+	DataBucket::LoadZoneCache(iZoneID, iInstanceID);
 
 	/*
 	 * Set Logging
@@ -878,56 +880,67 @@ void Zone::Shutdown(bool quiet)
 		return;
 	}
 
+	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Zone, zone->GetZoneID(), zone->GetInstanceID());
+	// save and kick all clients
+	for (auto c : entity_list.GetClientList()) {
+		c.second->Save();
+		c.second->WorldKick();
+	}
+
+	if (RuleB(Zone, StateSavingOnShutdown)) {
+		SaveZoneState();
+	}
+
 	entity_list.StopMobAI();
 
 	std::map<uint32, NPCType *>::iterator itr;
-	while (!zone->npctable.empty()) {
-		itr = zone->npctable.begin();
+	while (!npctable.empty()) {
+		itr = npctable.begin();
 		delete itr->second;
 		itr->second = nullptr;
-		zone->npctable.erase(itr);
+		npctable.erase(itr);
 	}
 
-	while (!zone->merctable.empty()) {
-		itr = zone->merctable.begin();
+	while (!merctable.empty()) {
+		itr = merctable.begin();
 		delete itr->second;
 		itr->second = nullptr;
-		zone->merctable.erase(itr);
+		merctable.erase(itr);
 	}
 
-	zone->adventure_entry_list_flavor.clear();
+	adventure_entry_list_flavor.clear();
 
 	std::map<uint32, LDoNTrapTemplate *>::iterator itr4;
-	while (!zone->ldon_trap_list.empty()) {
-		itr4 = zone->ldon_trap_list.begin();
+	while (!ldon_trap_list.empty()) {
+		itr4 = ldon_trap_list.begin();
 		delete itr4->second;
 		itr4->second = nullptr;
-		zone->ldon_trap_list.erase(itr4);
+		ldon_trap_list.erase(itr4);
 	}
-	zone->ldon_trap_entry_list.clear();
+	ldon_trap_entry_list.clear();
 
 	LogInfo(
 		"Zone [{}] zone_id [{}] version [{}] instance_id [{}]",
-		zone->GetShortName(),
-		zone->GetZoneID(),
-		zone->GetInstanceVersion(),
-		zone->GetInstanceID()
+		GetShortName(),
+		GetZoneID(),
+		GetInstanceVersion(),
+		GetInstanceID()
 	);
 	petition_list.ClearPetitions();
-	zone->SetZoneHasCurrentTime(false);
+	SetZoneHasCurrentTime(false);
 	if (!quiet) {
 		LogInfo(
 			"Zone [{}] zone_id [{}] version [{}] instance_id [{}] Going to sleep",
-			zone->GetShortName(),
-			zone->GetZoneID(),
-			zone->GetInstanceVersion(),
-			zone->GetInstanceID()
+			GetShortName(),
+			GetZoneID(),
+			GetInstanceVersion(),
+			GetInstanceID()
 		);
 	}
 
 	is_zone_loaded = false;
 
-	zone->ResetAuth();
+	ResetAuth();
 	safe_delete(zone);
 	entity_list.ClearAreas();
 	parse->ReloadQuests(true);
@@ -1092,26 +1105,33 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
 
 	mMovementManager = &MobMovementManager::Get();
 
-	SetNpcPositionUpdateDistance(0);
 	SetQuestHotReloadQueued(false);
 }
 
 Zone::~Zone() {
+	LogInfo("Zone destructor called for zone [{}]", short_name);
+
 	spawn2_list.Clear();
-	safe_delete(zonemap);
-	safe_delete(watermap);
-	safe_delete(pathing);
 	if (worldserver.Connected()) {
 		worldserver.SetZoneData(0);
 	}
+
+	for (auto &e: npc_emote_list) {
+		safe_delete(e);
+	}
+	npc_emote_list.clear();
+
+	zone_point_list.Clear();
+	entity_list.Clear();
+	parse->ReloadQuests();
+	ClearBlockedSpells();
+
 	safe_delete_array(short_name);
 	safe_delete_array(long_name);
 	safe_delete(Weather_Timer);
-	npc_emote_list.clear();
-	zone_point_list.Clear();
-	entity_list.Clear();
-	ClearBlockedSpells();
-
+	safe_delete(zonemap);
+	safe_delete(watermap);
+	safe_delete(pathing);
 	safe_delete(Instance_Timer);
 	safe_delete(Instance_Shutdown_Timer);
 	safe_delete(Instance_Warning_timer);
@@ -1140,9 +1160,39 @@ bool Zone::Init(bool is_static) {
 		}
 	}
 
+	if (!map_name) {
+		LogError("No map name found for zone [{}]", GetShortName());
+		return false;
+	}
+
 	zonemap  = Map::LoadMapFile(map_name);
 	watermap = WaterMap::LoadWaterMapfile(map_name);
 	pathing  = IPathfinder::Load(map_name);
+
+	LogInfo("Loading timezone data");
+	zone_time.setEQTimeZone(content_db.GetZoneTimezone(zoneid, GetInstanceVersion()));
+
+	LoadLDoNTraps();
+	LoadLDoNTrapEntries();
+
+	LoadDynamicZoneTemplates();
+	DynamicZone::CacheAllFromDatabase();
+
+	content_db.LoadGlobalLoot();
+
+	npc_scale_manager->LoadScaleData();
+
+	LoadGrids();
+
+	if (RuleB(Zone, LevelBasedEXPMods)) {
+		LoadLevelEXPMods();
+	}
+
+	RespawnTimesRepository::ClearExpiredRespawnTimers(database);
+
+	// make sure that anything that needs to be loaded prior to scripts is loaded before here
+	// this is to ensure that the scripts have access to the data they need
+	parse->ReloadQuests(true);
 
 	spawn_conditions.LoadSpawnConditions(short_name, instanceid);
 
@@ -1160,37 +1210,16 @@ bool Zone::Init(bool is_static) {
 
 	LogInfo("Loading adventure flavor text");
 	LoadAdventureFlavor();
-
 	LoadGroundSpawns();
 	LoadZoneObjects();
-
-	RespawnTimesRepository::ClearExpiredRespawnTimers(database);
-
 	LoadZoneDoors();
 	LoadZoneBlockedSpells();
-
-	//clear trader items if we are loading the bazaar
-	if (strncasecmp(short_name, "bazaar", 6) == 0) {
-		database.DeleteTraderItem(0);
-		database.DeleteBuyLines(0);
-	}
-
-	LoadLDoNTraps();
-	LoadLDoNTrapEntries();
 	LoadVeteranRewards();
 	LoadAlternateCurrencies();
 	LoadNPCEmotes(&npc_emote_list);
-
 	LoadAlternateAdvancement();
-
-	content_db.LoadGlobalLoot();
-
 	LoadBaseData();
-
-	//Load merchant data
 	LoadMerchants();
-
-	//Load temporary merchant data
 	LoadTempMerchantData();
 
 	// Merc data
@@ -1199,30 +1228,12 @@ bool Zone::Init(bool is_static) {
 		LoadMercenarySpells();
 	}
 
-	if (RuleB(Zone, LevelBasedEXPMods)) {
-		LoadLevelEXPMods();
-	}
-
 	petition_list.ClearPetitions();
 	petition_list.ReadDatabase();
 
-	LoadDynamicZoneTemplates();
-
-	DynamicZone::CacheAllFromDatabase();
-	Expedition::CacheAllFromDatabase();
-
 	guild_mgr.LoadGuilds();
 
-	LogInfo("Loading timezone data");
-	zone_time.setEQTimeZone(content_db.GetZoneTimezone(zoneid, GetInstanceVersion()));
-
 	LogInfo("Zone booted successfully zone_id [{}] time_offset [{}]", zoneid, zone_time.getEQTimeZone());
-
-	LoadGrids();
-
-	npc_scale_manager->LoadScaleData();
-
-	parse->ReloadQuests();
 
 	// logging origination information
 	LogSys.origination_info.zone_short_name = zone->short_name;
@@ -1265,7 +1276,6 @@ void Zone::ReloadStaticData() {
 
 	LoadVeteranRewards();
 	LoadAlternateCurrencies();
-	npc_emote_list.clear();
 	LoadNPCEmotes(&npc_emote_list);
 
 	//load the zone config file.
@@ -1368,9 +1378,9 @@ bool Zone::LoadZoneCFG(const char* filename, uint16 instance_version)
 	newzone_data.maxclip                   = z->maxclip;
 	newzone_data.time_type                 = z->time_type;
 	newzone_data.gravity                   = z->gravity;
-	newzone_data.fast_regen_hp             = z->fast_regen_hp;
-	newzone_data.fast_regen_mana           = z->fast_regen_mana;
-	newzone_data.fast_regen_endurance      = z->fast_regen_endurance;
+	newzone_data.fast_regen_hp             = z->fast_regen_hp > 0 ? z->fast_regen_hp : 180;
+	newzone_data.fast_regen_mana           = z->fast_regen_mana > 0 ? z->fast_regen_mana : 180;
+	newzone_data.fast_regen_endurance      = z->fast_regen_endurance > 0 ? z->fast_regen_endurance : 180;
 	newzone_data.npc_aggro_max_dist        = z->npc_max_aggro_dist;
 	newzone_data.underworld_teleport_index = z->underworld_teleport_index;
 	newzone_data.lava_damage               = z->lava_damage;
@@ -1378,17 +1388,17 @@ bool Zone::LoadZoneCFG(const char* filename, uint16 instance_version)
 	newzone_data.suspend_buffs             = z->suspendbuffs;
 
 	// local attributes
-	can_bind                  = z->canbind != 0;
-	is_city                   = z->canbind == 2;
-	can_combat                = z->cancombat != 0;
-	can_levitate              = z->canlevitate != 0;
-	can_castoutdoor           = z->castoutdoor != 0;
-	is_hotzone                = z->hotzone != 0;
-	max_movement_update_range = z->max_movement_update_range;
-	default_ruleset           = z->ruleset;
-	allow_mercs               = true;
-	m_graveyard_id            = z->graveyard_id;
-	m_max_clients             = z->maxclients;
+	can_bind              = z->canbind != 0;
+	is_city               = z->canbind == 2;
+	can_combat            = z->cancombat != 0;
+	can_levitate          = z->canlevitate != 0;
+	can_castoutdoor       = z->castoutdoor != 0;
+	is_hotzone            = z->hotzone != 0;
+	m_client_update_range = z->client_update_range;
+	default_ruleset       = z->ruleset;
+	allow_mercs           = true;
+	m_graveyard_id        = z->graveyard_id;
+	m_max_clients         = z->maxclients;
 
 	SetIdleWhenEmpty(z->idle_when_empty);
 	SetSecondsBeforeIdle(z->seconds_before_idle);
@@ -1542,10 +1552,6 @@ bool Zone::Process() {
 		if (adv_data && !did_adventure_actions) {
 			DoAdventureActions();
 		}
-
-		if (GetNpcPositionUpdateDistance() == 0) {
-			CalculateNpcUpdateDistanceSpread();
-		}
 	}
 
 	if (hot_reload_timer.Check() && IsQuestHotReloadQueued()) {
@@ -1631,7 +1637,7 @@ bool Zone::Process() {
 					if (minutes_warning > 0)
 					{
 						// expedition expire warnings are handled by world
-						auto expedition = Expedition::FindCachedExpeditionByZoneInstance(GetZoneID(), GetInstanceID());
+						auto expedition = DynamicZone::FindExpeditionByZone(GetZoneID(), GetInstanceID());
 						if (!expedition)
 						{
 							entity_list.ExpeditionWarning(minutes_warning);
@@ -1931,6 +1937,10 @@ void Zone::Repop(bool is_forced)
 	}
 
 	spawn_conditions.LoadSpawnConditions(short_name, instanceid);
+
+	if (RuleB(Zone, StateSavingOnShutdown)) {
+		ClearZoneState(zoneid, instanceid);
+	}
 
 	if (!content_db.PopulateZoneSpawnList(zoneid, spawn2_list, GetInstanceVersion())) {
 		LogDebug("Error in Zone::Repop: database.PopulateZoneSpawnList failed");
@@ -2583,6 +2593,10 @@ void Zone::DoAdventureActions()
 
 void Zone::LoadNPCEmotes(std::vector<NPC_Emote_Struct*>* v)
 {
+	for (auto &e: *v) {
+		safe_delete(e);
+	}
+
 	v->clear();
 
 	const auto& l = NpcEmotesRepository::All(content_db);
@@ -2605,52 +2619,6 @@ void Zone::LoadNPCEmotes(std::vector<NPC_Emote_Struct*>* v)
 		l.size() != 1 ? "s" : ""
 	);
 
-}
-
-void Zone::ReloadWorld(uint8 global_repop)
-{
-	entity_list.ClearAreas();
-	parse->ReloadQuests();
-
-	if (global_repop) {
-		if (global_repop == ReloadWorld::ForceRepop) {
-			zone->ClearSpawnTimers();
-		}
-
-		zone->Repop();
-	}
-
-	worldserver.SendEmoteMessage(
-		0,
-		0,
-		AccountStatus::GMAdmin,
-		Chat::Yellow,
-		fmt::format(
-			"Quests reloaded {}for {}{}.",
-			(
-				global_repop ?
-				(
-					global_repop == ReloadWorld::Repop ?
-					"and repopped NPCs " :
-					"and forcefully repopped NPCs "
-				) :
-				""
-			),
-			fmt::format(
-				"{} ({})",
-				GetLongName(),
-				GetZoneID()
-			),
-			(
-				GetInstanceID() ?
-				fmt::format(
-					" (Instance ID {})",
-					GetInstanceID()
-				) :
-				""
-			)
-		).c_str()
-	);
 }
 
 void Zone::ClearSpawnTimers()
@@ -2694,6 +2662,22 @@ uint32 Zone::GetSpawnKillCount(uint32 in_spawnid) {
 	return 0;
 }
 
+bool Zone::IsWaterZone(float z)
+{
+
+	switch (GetZoneID()) {
+		case Zones::KEDGE:
+			return true;
+		case Zones::POWATER:
+			if (z < 0.0f) {
+				return true;
+			}
+			return false;
+		default:
+			return false;
+	}
+}
+
 void Zone::SetIsHotzone(bool is_hotzone)
 {
 	Zone::is_hotzone = is_hotzone;
@@ -2717,62 +2701,6 @@ void Zone::SetUCSServerAvailable(bool ucss_available, uint32 update_timestamp) {
 	}
 	if (m_last_ucss_update < update_timestamp)
 		m_ucss_available = ucss_available;
-}
-
-int Zone::GetNpcPositionUpdateDistance() const
-{
-	return npc_position_update_distance;
-}
-
-void Zone::SetNpcPositionUpdateDistance(int in_npc_position_update_distance)
-{
-	Zone::npc_position_update_distance = in_npc_position_update_distance;
-}
-
-void Zone::CalculateNpcUpdateDistanceSpread()
-{
-	float max_x = 0;
-	float max_y = 0;
-	float min_x = 0;
-	float min_y = 0;
-
-	auto &mob_list = entity_list.GetMobList();
-
-	for (auto &it : mob_list) {
-		Mob *entity = it.second;
-		if (!entity->IsNPC()) {
-			continue;
-		}
-
-		if (entity->GetX() <= min_x) {
-			min_x = entity->GetX();
-		}
-
-		if (entity->GetY() <= min_y) {
-			min_y = entity->GetY();
-		}
-
-		if (entity->GetX() >= max_x) {
-			max_x = entity->GetX();
-		}
-
-		if (entity->GetY() >= max_y) {
-			max_y = entity->GetY();
-		}
-	}
-
-	int x_spread        = int(std::abs(max_x - min_x));
-	int y_spread        = int(std::abs(max_y - min_y));
-	int combined_spread = int(std::abs((x_spread + y_spread) / 2));
-	int update_distance = EQ::ClampLower(int(combined_spread / 4), int(zone->GetMaxMovementUpdateRange()));
-
-	SetNpcPositionUpdateDistance(update_distance);
-
-	Log(Logs::General, Logs::Debug,
-		"NPC update spread distance set to [%i] combined_spread [%i]",
-		update_distance,
-		combined_spread
-	);
 }
 
 bool Zone::IsQuestHotReloadQueued() const
@@ -2987,189 +2915,74 @@ std::string Zone::GetAAName(int aa_id)
 	return std::string();
 }
 
-bool Zone::CompareDataBucket(uint8 bucket_comparison, const std::string& bucket_value, const std::string& player_value)
+bool Zone::CompareDataBucket(uint8 comparison_type, const std::string& bucket, const std::string& value)
 {
-	std::vector<std::string> bucket_checks;
-	bool found = false;
-	bool passes = false;
-
-	switch (bucket_comparison) {
-		case BucketComparison::BucketEqualTo:
-		{
-			if (player_value != bucket_value) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketNotEqualTo:
-		{
-			if (player_value == bucket_value) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketGreaterThanOrEqualTo:
-		{
-			if (!Strings::IsNumber(player_value) || !Strings::IsNumber(bucket_value)) {
-				break;
-			}
-
-			if (Strings::ToBigInt(player_value) < Strings::ToBigInt(bucket_value)) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketLesserThanOrEqualTo:
-		{
-			if (!Strings::IsNumber(player_value) || !Strings::IsNumber(bucket_value)) {
-				break;
-			}
-
-			if (Strings::ToBigInt(player_value) > Strings::ToBigInt(bucket_value)) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketGreaterThan:
-		{
-			if (!Strings::IsNumber(player_value) || !Strings::IsNumber(bucket_value)) {
-				break;
-			}
-
-			if (Strings::ToBigInt(player_value) <= Strings::ToBigInt(bucket_value)) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketLesserThan:
-		{
-			if (!Strings::IsNumber(player_value) || !Strings::IsNumber(bucket_value)) {
-				break;
-			}
-
-			if (Strings::ToBigInt(player_value) >= Strings::ToBigInt(bucket_value)) {
-				break;
-			}
-
-			passes = true;
-
-			break;
-		}
-		case BucketComparison::BucketIsAny:
-		{
-			bucket_checks = Strings::Split(bucket_value, "|");
-			if (bucket_checks.empty()) {
-				break;
-			}
-
-			if (std::find(bucket_checks.begin(), bucket_checks.end(), player_value) != bucket_checks.end()) {
-				found = true;
-			}
-
-			if (!found) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketIsNotAny:
-		{
-			bucket_checks = Strings::Split(bucket_value, "|");
-			if (bucket_checks.empty()) {
-				break;
-			}
-
-			if (std::find(bucket_checks.begin(), bucket_checks.end(), player_value) != bucket_checks.end()) {
-				found = true;
-			}
-
-			if (found) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketIsBetween:
-		{
-			bucket_checks = Strings::Split(bucket_value, "|");
-			if (bucket_checks.empty()) {
-				break;
-			}
-
-			if (
-				!Strings::IsNumber(player_value) ||
-				!Strings::IsNumber(bucket_checks[0]) ||
-				!Strings::IsNumber(bucket_checks[1])
-			) {
-				break;
-			}
-
-			if (
-				!EQ::ValueWithin(
-					Strings::ToBigInt(player_value),
-					Strings::ToBigInt(bucket_checks[0]),
-					Strings::ToBigInt(bucket_checks[1])
-				)
-			) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
-		case BucketComparison::BucketIsNotBetween:
-		{
-			bucket_checks = Strings::Split(bucket_value, "|");
-			if (bucket_checks.empty()) {
-				break;
-			}
-
-			if (
-				!Strings::IsNumber(player_value) ||
-				!Strings::IsNumber(bucket_checks[0]) ||
-				!Strings::IsNumber(bucket_checks[1])
-			) {
-				break;
-			}
-
-			if (
-				EQ::ValueWithin(
-					Strings::ToBigInt(player_value),
-					Strings::ToBigInt(bucket_checks[0]),
-					Strings::ToBigInt(bucket_checks[1])
-				)
-			) {
-				break;
-			}
-
-			passes = true;
-			break;
-		}
+	if (!ComparisonType::IsValid(comparison_type)) {
+		return false;
 	}
 
-	return passes;
+	if (EQ::ValueWithin(comparison_type, ComparisonType::Equal, ComparisonType::NotEqual)) {
+		const bool is_equal = value == bucket;
+
+		return comparison_type == ComparisonType::Equal ? is_equal : !is_equal;
+	} else if (EQ::ValueWithin(comparison_type, ComparisonType::GreaterOrEqual, ComparisonType::LesserOrEqual)) {
+		if (!Strings::IsNumber(value) || !Strings::IsNumber(bucket)) {
+			return false;
+		}
+
+		const int64 p = Strings::ToBigInt(value);
+		const int64 b = Strings::ToBigInt(bucket);
+
+		const bool is_greater_or_equal = p >= b;
+		const bool is_lesser_or_equal  = p <= b;
+
+		return comparison_type == ComparisonType::GreaterOrEqual ? is_greater_or_equal : is_lesser_or_equal;
+	} else if (EQ::ValueWithin(comparison_type, ComparisonType::Greater, ComparisonType::Lesser)) {
+		if (!Strings::IsNumber(value) || !Strings::IsNumber(bucket)) {
+			return false;
+		}
+
+		const bool is_greater = Strings::ToBigInt(value) > Strings::ToBigInt(bucket);
+
+		return comparison_type == ComparisonType::Greater ? is_greater : !is_greater;
+	} else if (EQ::ValueWithin(comparison_type, ComparisonType::Any, ComparisonType::NotAny)) {
+		const auto& values = Strings::Split(bucket, "|");
+		if (values.empty()) {
+			return false;
+		}
+
+		const bool is_any = std::find(values.begin(), values.end(), value) != values.end();
+
+		return comparison_type == ComparisonType::Any ? is_any : !is_any;
+	} else if (EQ::ValueWithin(comparison_type, ComparisonType::Between, ComparisonType::NotBetween)) {
+		if (!Strings::IsNumber(value)) {
+			return false;
+		}
+
+		const auto& values = Strings::Split(bucket, "|");
+		if (values.empty()) {
+			return false;
+		}
+
+		if (!Strings::IsNumber(values[0]) || !Strings::IsNumber(values[1])) {
+			return false;
+		}
+
+		const bool is_between = EQ::ValueWithin(
+			Strings::ToBigInt(value),
+			Strings::ToBigInt(values[0]),
+			Strings::ToBigInt(values[1])
+		);
+
+		return comparison_type == ComparisonType::Between ? is_between : !is_between;
+	}
+
+	return false;
 }
 
 void Zone::ReloadContentFlags()
 {
-	auto pack = new ServerPacket(ServerOP_ReloadContentFlags, 0);
-	if (pack) {
-		worldserver.SendPacket(pack);
-	}
-
-	safe_delete(pack);
+	worldserver.SendReload(ServerReload::Type::ContentFlags);
 }
 
 void Zone::ClearEXPModifier(Client* c)
@@ -3341,4 +3154,69 @@ bool Zone::DoesAlternateCurrencyExist(uint32 currency_id)
 	);
 }
 
+std::string Zone::GetBucket(const std::string& bucket_name)
+{
+	DataBucketKey k = {};
+	k.zone_id     = zoneid;
+	k.instance_id = instanceid;
+	k.key         = bucket_name;
+
+	return DataBucket::GetData(k).value;
+}
+
+void Zone::SetBucket(const std::string& bucket_name, const std::string& bucket_value, const std::string& expiration)
+{
+	DataBucketKey k = {};
+	k.zone_id     = zoneid;
+	k.instance_id = instanceid;
+	k.key         = bucket_name;
+	k.expires     = expiration;
+	k.value       = bucket_value;
+
+	DataBucket::SetData(k);
+}
+
+void Zone::DeleteBucket(const std::string& bucket_name)
+{
+	DataBucketKey k = {};
+	k.zone_id     = zoneid;
+	k.instance_id = instanceid;
+	k.key         = bucket_name;
+
+	DataBucket::DeleteData(k);
+}
+
+std::string Zone::GetBucketExpires(const std::string& bucket_name)
+{
+	DataBucketKey k = {};
+	k.zone_id     = zoneid;
+	k.instance_id = instanceid;
+	k.key         = bucket_name;
+
+	return DataBucket::GetDataExpires(k);
+}
+
+std::string Zone::GetBucketRemaining(const std::string& bucket_name)
+{
+	DataBucketKey k = {};
+	k.zone_id     = zoneid;
+	k.instance_id = instanceid;
+	k.key         = bucket_name;
+
+	return DataBucket::GetDataRemaining(k);
+}
+
+void Zone::DisableRespawnTimers()
+{
+	LinkedListIterator<Spawn2 *> e(spawn2_list);
+
+	e.Reset();
+
+	while (e.MoreElements()) {
+		e.GetData()->SetRespawnTimer(std::numeric_limits<uint32_t>::max());
+		e.Advance();
+	}
+}
+
+#include "zone_save_state.cpp"
 #include "zone_loot.cpp"

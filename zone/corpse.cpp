@@ -16,8 +16,8 @@
 #include "../common/say_link.h"
 
 #include "corpse.h"
+#include "dynamic_zone.h"
 #include "entity.h"
-#include "expedition.h"
 #include "groups.h"
 #include "mob.h"
 #include "raids.h"
@@ -31,12 +31,14 @@
 #include "../common/repositories/character_corpses_repository.h"
 #include "../common/repositories/character_corpse_items_repository.h"
 #include <iostream>
+#include "queryserv.h"
 
 
 extern EntityList           entity_list;
-extern Zone                 *zone;
+extern Zone                *zone;
 extern WorldServer          worldserver;
 extern npcDecayTimes_Struct npcCorpseDecayTimes[100];
+extern QueryServ           *QServ;
 
 void Corpse::SendEndLootErrorPacket(Client *client)
 {
@@ -70,7 +72,7 @@ Corpse::Corpse(
 	npc->GetGender(), // in_gender
 	npc->GetRace(), // in_race
 	npc->GetClass(), // in_class
-	BT_Humanoid, // in_bodytype
+	BodyType::Humanoid, // in_bodytype
 	npc->GetDeity(), // in_deity
 	npc->GetLevel(), // in_level
 	npc->GetNPCTypeID(), // in_npctype_id
@@ -189,7 +191,7 @@ Corpse::Corpse(Client *c, int32 rez_exp, KilledByTypes in_killed_by) : Mob(
 	c->GetGender(), // in_gender
 	c->GetRace(), // in_race
 	c->GetClass(), // in_class
-	BT_Humanoid, // in_bodytype
+	BodyType::Humanoid, // in_bodytype
 	c->GetDeity(), // in_deity
 	c->GetLevel(), // in_level
 	0, // in_npctype_id
@@ -366,8 +368,8 @@ Corpse::Corpse(Client *c, int32 rez_exp, KilledByTypes in_killed_by) : Mob(
 
 			if (iter != removed_list.end()) {
 				std::stringstream ss("");
-				ss << "DELETE FROM `inventory` WHERE `charid` = " << c->CharacterID();
-				ss << " AND `slotid` IN (" << (*iter);
+				ss << "DELETE FROM `inventory` WHERE `character_id` = " << c->CharacterID();
+				ss << " AND `slot_id` IN (" << (*iter);
 				++iter;
 
 				while (iter != removed_list.end()) {
@@ -495,7 +497,7 @@ Corpse::Corpse(
 	gender, // in_gender
 	race, // in_race
 	class_, // in_class
-	BT_Humanoid, // in_bodytype
+	BodyType::Humanoid, // in_bodytype
 	deity, // in_deity
 	level, // in_level
 	0, // in_npctype_id
@@ -845,7 +847,7 @@ LootItem *Corpse::GetItem(uint16 lootslot, LootItem **bag_item_data)
 
 		// convert above code to for loop
 		for (const auto &item: m_item_list) {
-			if (item->equip_slot >= bagstart && item->equip_slot < bagstart + 10) {
+			if (item->equip_slot >= bagstart && item->equip_slot < bagstart + EQ::invbag::SLOT_COUNT) {
 				bag_item_data[item->equip_slot - bagstart] = item;
 			}
 		}
@@ -1472,7 +1474,7 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 
 	const EQ::ItemData *item      = nullptr;
 	EQ::ItemInstance   *inst      = nullptr;
-	LootItem           *item_data = nullptr, *bag_item_data[10] = {};
+	LootItem           *item_data = nullptr, *bag_item_data[EQ::invbag::SLOT_COUNT] = {};
 
 	memset(bag_item_data, 0, sizeof(bag_item_data));
 	if (GetPlayerKillItem() > 1) {
@@ -1569,11 +1571,17 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 
 		if (player_event_logs.IsEventEnabled(PlayerEvent::LOOT_ITEM) && !IsPlayerCorpse()) {
 			auto e = PlayerEvent::LootItemEvent{
-				.item_id = inst->GetItem()->ID,
-				.item_name = inst->GetItem()->Name,
-				.charges = inst->GetCharges(),
-				.npc_id = GetNPCTypeID(),
-				.corpse_name = EntityList::RemoveNumbers(corpse_name)
+				.item_id      = inst->GetItem()->ID,
+				.item_name    = inst->GetItem()->Name,
+				.charges      = inst->GetCharges(),
+				.augment_1_id = inst->GetAugmentItemID(0),
+				.augment_2_id = inst->GetAugmentItemID(1),
+				.augment_3_id = inst->GetAugmentItemID(2),
+				.augment_4_id = inst->GetAugmentItemID(3),
+				.augment_5_id = inst->GetAugmentItemID(4),
+				.augment_6_id = inst->GetAugmentItemID(5),
+				.npc_id       = GetNPCTypeID(),
+				.corpse_name  = EntityList::RemoveNumbers(corpse_name)
 			};
 
 			RecordPlayerEventLogWithClient(c, PlayerEvent::LOOT_ITEM, e);
@@ -1615,21 +1623,8 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 		// safe to ACK now
 		c->QueuePacket(app);
 
-		if (!IsPlayerCorpse()) {
-			if (RuleB(Character, EnableDiscoveredItems) && c && !c->IsDiscovered(inst->GetItem()->ID)) {
-				if (!c->GetGM()) {
-					c->DiscoverItem(inst->GetItem()->ID);
-				} else {
-					const std::string& item_link = database.CreateItemLink(inst->GetItem()->ID);
-					c->Message(
-						Chat::White,
-						fmt::format(
-							"Your GM flag prevents {} from being added to discovered items.",
-							item_link
-						).c_str()
-					);
-				}
-			}
+		if (!IsPlayerCorpse() && c) {
+			c->CheckItemDiscoverability(inst->GetID());
 		}
 
 		if (zone->adv_data) {
@@ -1871,9 +1866,10 @@ bool Corpse::HasItem(uint32 item_id)
 	return false;
 }
 
-uint16 Corpse::CountItem(uint32 item_id)
+uint32 Corpse::CountItem(uint32 item_id)
 {
-	uint16 item_count = 0;
+	uint32 item_count = 0;
+
 	if (!database.GetItem(item_id)) {
 		return item_count;
 	}
@@ -1893,6 +1889,7 @@ uint16 Corpse::CountItem(uint32 item_id)
 			item_count += i->charges > 0 ? i->charges : 1;
 		}
 	}
+
 	return item_count;
 }
 

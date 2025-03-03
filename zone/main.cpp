@@ -52,6 +52,7 @@
 #include "task_manager.h"
 #include "quest_parser_collection.h"
 #include "embparser.h"
+#include "../common/evolving_items.h"
 #include "lua_parser.h"
 #include "questmgr.h"
 #include "npc_scale_manager.h"
@@ -110,6 +111,7 @@ PathManager           path;
 PlayerEventLogs       player_event_logs;
 DatabaseUpdate        database_update;
 SkillCaps             skill_caps;
+EvolvingItemsManager  evolving_items_manager;
 
 const SPDat_Spell_Struct* spells;
 int32 SPDAT_RECORDS = -1;
@@ -122,6 +124,7 @@ void CatchSignal(int sig_num);
 
 extern void MapOpcodes();
 
+bool CheckForCompatibleQuestPlugins();
 int main(int argc, char **argv)
 {
 	RegisterExecutablePlatform(ExePlatformZone);
@@ -130,7 +133,7 @@ int main(int argc, char **argv)
 	set_exception_handler();
 
 	// silence logging if we ran a command
-	if (ZoneCLI::RanConsoleCommand(argc, argv)) {
+	if (ZoneCLI::RanConsoleCommand(argc, argv) || ZoneCLI::RanTestCommand(argc, argv)) {
 		LogSys.SilenceConsoleLogging();
 	}
 
@@ -295,8 +298,8 @@ int main(int argc, char **argv)
 		EQ::InitializeDynamicLookups();
 	}
 
-	// command handler
-	if (ZoneCLI::RanConsoleCommand(argc, argv) && !ZoneCLI::RanSidecarCommand(argc, argv)) {
+	// command handler (no sidecar or test commands)
+	if (ZoneCLI::RanConsoleCommand(argc, argv) && !(ZoneCLI::RanSidecarCommand(argc, argv) || ZoneCLI::RanTestCommand(argc, argv))) {
 		LogSys.EnableConsoleLogging();
 		ZoneCLI::CommandHandler(argc, argv);
 	}
@@ -306,6 +309,10 @@ int main(int argc, char **argv)
 		->LoadLogDatabaseSettings()
 		->SetGMSayHandler(&Zone::GMSayHookCallBackProcess)
 		->StartFileLogs();
+
+	if (ZoneCLI::RanTestCommand(argc, argv)) {
+		LogSys.SilenceConsoleLogging();
+	}
 
 	player_event_logs.SetDatabase(&database)->Init();
 
@@ -367,6 +374,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (!CheckForCompatibleQuestPlugins()) {
+		LogError("Incompatible quest plugins detected, please update your plugins to the latest version");
+		return 1;
+	}
+
 	// load these here for now until spells and items can be truly repointed to "content_db"
 	database.SetSharedItemsCount(content_db.GetItemsCount());
 	database.SetSharedSpellsCount(content_db.GetSpellsCount());
@@ -386,6 +398,11 @@ int main(int argc, char **argv)
 	content_db.LoadFactionData();
 	title_manager.LoadTitles();
 	content_db.LoadTributes();
+
+	// Load evolving item data
+	evolving_items_manager.SetDatabase(&database);
+	evolving_items_manager.SetContentDatabase(&content_db);
+	evolving_items_manager.LoadEvolvingItems();
 
 	database.GetDecayTimes(npcCorpseDecayTimes);
 
@@ -446,6 +463,21 @@ int main(int argc, char **argv)
 	auto perl_parser = new PerlembParser();
 	parse->RegisterQuestInterface(perl_parser, "pl");
 
+#ifdef __linux__
+	std::string current_version = CURRENT_VERSION;
+	// running release binaries
+	if (!Strings::Contains(current_version, "-dev")) {
+		if (!fs::exists("/opt/eqemu-perl")) {
+			LogError("You are running release binaries without having the required eqemu version of perl compiled and installed on this system present at /opt/eqemu-perl");
+			LogError("If you are running an old Linux install, you need to install the required perl version from the eqemu-perl");
+			LogError("Instructions can be referenced at https://github.com/Akkadius/akk-stack/blob/master/containers/eqemu-server/Dockerfile#L92-L106");
+			LogError("Press any key to continue");
+			getchar();
+			return 0;
+		}
+	}
+#endif
+
 	/* Load Perl Event Export Settings */
 	parse->LoadPerlEventExportSettings(parse->perl_event_export_settings);
 
@@ -455,11 +487,15 @@ int main(int argc, char **argv)
 	LogInfo("Loading quests");
 	parse->ReloadQuests();
 
+	QServ->CheckForConnectState();
+
 	worldserver.Connect();
 	worldserver.SetScheduler(&event_scheduler);
 
 	// sidecar command handler
-	if (ZoneCLI::RanConsoleCommand(argc, argv) && ZoneCLI::RanSidecarCommand(argc, argv)) {
+	if (ZoneCLI::RanConsoleCommand(argc, argv)
+		&& (ZoneCLI::RanSidecarCommand(argc, argv) || ZoneCLI::RanTestCommand(argc, argv))) {
+		LogSys.EnableConsoleLogging();
 		ZoneCLI::CommandHandler(argc, argv);
 	}
 
@@ -595,16 +631,17 @@ int main(int argc, char **argv)
 
 				if (zone) {
 					if (!zone->Process()) {
-						Zone::Shutdown();
+						zone->Shutdown();
 					}
 				}
 
 				if (quest_timers.Check()) {
 					quest_manager.Process();
 				}
-
 			}
 		}
+
+		QServ->CheckForConnectState();
 
 		if (InterserverTimer.Check()) {
 			InterserverTimer.Start();
@@ -631,7 +668,7 @@ int main(int argc, char **argv)
 	safe_delete(Config);
 
 	if (zone != 0) {
-		Zone::Shutdown(true);
+		zone->Shutdown(true);
 	}
 	//Fix for Linux world server problem.
 	safe_delete(task_manager);
@@ -643,13 +680,14 @@ int main(int argc, char **argv)
 	LogSys.CloseFileLogs();
 
 	safe_delete(mutex);
+	safe_delete(QServ);
 
 	return 0;
 }
 
 void Shutdown()
 {
-	Zone::Shutdown(true);
+	zone->Shutdown(true);
 	LogInfo("Shutting down...");
 	LogSys.CloseFileLogs();
 	EQ::EventLoop::Get().Shutdown();
@@ -689,4 +727,52 @@ void UpdateWindowTitle(char *iNewTitle)
 	}
 	SetConsoleTitle(tmp);
 #endif
+}
+
+bool CheckForCompatibleQuestPlugins()
+{
+	const std::vector<std::pair<std::string, bool *>> directories = {
+		{"lua_modules", nullptr},
+		{"plugins",     nullptr}
+	};
+
+	bool lua_found  = false;
+	bool perl_found = false;
+
+	try {
+		for (const auto &[directory, flag]: directories) {
+			std::string dir_path = path.GetServerPath() + "/" + directory;
+			if (!File::Exists(dir_path)) { continue; }
+
+			for (const auto &file: fs::directory_iterator(dir_path)) {
+				if (!file.is_regular_file()) { continue; }
+
+				std::string file_path = file.path().string();
+				if (!File::Exists(file_path)) { continue; }
+
+				auto r = File::GetContents(file_path);
+				if (!Strings::Contains(r.contents, "CheckHandin")) { continue; }
+
+				if (directory == "lua_modules") {
+					lua_found = true;
+				}
+				else {
+					perl_found = true;
+				}
+
+				if (lua_found && perl_found) { return true; }
+			}
+		}
+	} catch (const fs::filesystem_error &ex) {
+		LogError("Failed to check for compatible quest plugins: {}", ex.what());
+	}
+
+	if (!lua_found) {
+		LogError("Failed to find CheckHandin in lua_modules");
+	}
+	if (!perl_found) {
+		LogError("Failed to find CheckHandin in plugins");
+	}
+
+	return lua_found && perl_found;
 }

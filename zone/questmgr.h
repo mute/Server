@@ -110,7 +110,7 @@ public:
 	void settarget(const char *type, int target_id);
 	void follow(int entity_id, int distance);
 	void sfollow();
-	void changedeity(int deity_id);
+	void changedeity(uint32 deity_id);
 	void exp(int amt);
 	void level(int newlevel);
 	void traindisc(uint32 discipline_tome_item_id);
@@ -121,7 +121,7 @@ public:
 	std::string getldonthemename(uint32 theme_id);
 	std::string getfactionname(int faction_id);
 	std::string getlanguagename(uint8 language_id);
-	std::string getbodytypename(uint32 bodytype_id);
+	std::string getbodytypename(uint8 body_type_id);
 	std::string getconsiderlevelname(uint8 consider_level);
 	void safemove();
 	void rain(int weather);
@@ -152,7 +152,7 @@ public:
 	void faction(int faction_id, int faction_value, int temp);
 	void rewardfaction(int faction_id, int faction_value);
 	void setsky(uint8 new_sky);
-	void setguild(uint32 new_guild_id, uint8 new_rank);
+	void SetGuild(uint32 new_guild_id, uint8 new_rank);
 	void CreateGuild(const char *guild_name, const char *leader);
 	void settime(uint8 new_hour, uint8 new_min, bool update_world = true);
 	void itemlink(int item_id);
@@ -225,7 +225,8 @@ public:
 	void assigntask(int taskid, bool enforce_level_requirement = false);
 	void failtask(int taskid);
 	int tasktimeleft(int taskid);
-	int istaskcompleted(int taskid);
+	bool istaskcompleted(int task_id);
+	bool aretaskscompleted(const std::vector<int>& task_ids);
 	int enabledtaskcount(int taskset);
 	int firsttaskinset(int taskset);
 	int lasttaskinset(int taskset);
@@ -248,7 +249,7 @@ public:
 	int getlevel(uint8 type);
 	int collectitems(uint32 item_id, bool remove);
 	int collectitems_processSlot(int16 slot_id, uint32 item_id, bool remove);
-	int countitem(uint32 item_id);
+	uint32 countitem(uint32 item_id);
 	void removeitem(uint32 item_id, uint32 quantity = 1);
 	std::string getitemcomment(uint32 item_id);
 	std::string getitemlore(uint32 item_id);
@@ -284,6 +285,7 @@ public:
 	void MovePCInstance(int zone_id, int instance_id, const glm::vec4& position);
 	void FlagInstanceByGroupLeader(uint32 zone, int16 version);
 	void FlagInstanceByRaidLeader(uint32 zone, int16 version);
+	std::string varlink(EQ::ItemInstance* inst);
 	std::string varlink(uint32 item_id, int16 charges = 0, uint32 aug1 = 0, uint32 aug2 = 0, uint32 aug3 = 0, uint32 aug4 = 0, uint32 aug5 = 0, uint32 aug6 = 0, bool attuned = false);
 	std::string getcharnamebyid(uint32 char_id);
 	uint32 getcharidbyname(const char* name);
@@ -355,9 +357,12 @@ public:
 	void SendChannelMessage(Client* from, const char* to, uint8 channel_number, uint32 guild_id, uint8 language_id, uint8 language_skill, const char* message);
 	std::string GetAutoLoginCharacterNameByAccountID(uint32 account_id);
 	bool SetAutoLoginCharacterNameByAccountID(uint32 account_id, const std::string& character_name);
+	void SpawnCircle(uint32 npc_id, glm::vec4 position, float radius, uint32 points);
+	void SpawnGrid(uint32 npc_id, glm::vec4 position, float spacing, uint32 spawn_count);
 
 	Bot *GetBot() const;
 	Client *GetInitiator() const;
+	Merc* GetMerc() const;
 	NPC *GetNPC() const;
 	Mob *GetOwner() const;
 	EQ::InventoryProfile* GetInventory() const;
@@ -371,6 +376,7 @@ public:
 	bool botquest();
 	bool createBot(const char *name, const char *lastname, uint8 level, uint16 race, uint8 botclass, uint8 gender);
 
+	bool handin(std::map<std::string, uint32> required);
 
 private:
 	std::stack<running_quest> quests_running_;

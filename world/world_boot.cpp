@@ -5,12 +5,12 @@
 #include "../common/http/uri.h"
 #include "../common/net/console_server.h"
 #include "../common/net/servertalk_server.h"
+#include "../common/repositories/character_expedition_lockouts_repository.h"
 #include "../common/repositories/character_task_timers_repository.h"
 #include "../common/rulesys.h"
 #include "../common/strings.h"
 #include "adventure_manager.h"
 #include "dynamic_zone_manager.h"
-#include "expedition_database.h"
 #include "login_server_list.h"
 #include "shared_task_manager.h"
 #include "ucs.h"
@@ -99,6 +99,13 @@ bool WorldBoot::HandleCommandInput(int argc, char **argv)
 			std::cout << "Binary Database Version: " << database_version << " : " << bots_database_version << std::endl;
 			return true;
 		}
+	}
+
+	// check if we ran a valid command, this whole CLI handler needs to be improved at a later time
+	std::string arg1 = argc >= 2 ? argv[1] : "";
+	if (argc >= 2 && !Strings::Contains(arg1, ":")) {
+		std::cout << "Invalid command, use --help to see available commands" << std::endl;
+		return true;
 	}
 
 	return false;
@@ -289,6 +296,17 @@ bool WorldBoot::DatabaseLoadRoutines(int argc, char **argv)
 	LogInfo("Clearing inventory snapshots");
 	database.ClearInvSnapshots();
 	LogInfo("Loading items");
+	LogInfo("Clearing trader table details");
+	database.ClearTraderDetails();
+	database.ClearBuyerDetails();
+	LogInfo("Clearing buyer table details");
+
+	if (RuleB(Bots, Enabled)) {
+		LogInfo("Clearing [bot_pet_buffs] table of stale entries");
+		database.QueryDatabase(
+			"DELETE FROM bot_pet_buffs WHERE NOT EXISTS (SELECT * FROM bot_pets WHERE bot_pets.pets_index = bot_pet_buffs.pets_index)"
+		);
+	}
 
 	if (!content_db.LoadItems(hotfix_name)) {
 		LogError("Error: Could not load item data. But ignoring");
@@ -356,9 +374,8 @@ bool WorldBoot::DatabaseLoadRoutines(int argc, char **argv)
 	LogInfo("Purging expired dynamic zones and members");
 	dynamic_zone_manager.PurgeExpiredDynamicZones();
 
-	LogInfo("Purging expired expeditions");
-	ExpeditionDatabase::PurgeExpiredExpeditions();
-	ExpeditionDatabase::PurgeExpiredCharacterLockouts();
+	LogInfo("Purging expired character expedition lockouts");
+	CharacterExpeditionLockoutsRepository::DeleteWhere(database, "expire_time <= NOW()");
 
 	LogInfo("Purging expired character task timers");
 	CharacterTaskTimersRepository::DeleteWhere(database, "expire_time <= NOW()");

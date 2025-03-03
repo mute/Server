@@ -5,6 +5,7 @@
 #include "entity.h"
 #include "groups.h"
 #include "mob.h"
+#include "quest_parser_collection.h"
 
 #include "zone.h"
 #include "string_ids.h"
@@ -58,7 +59,7 @@ Merc::Merc(const NPCType* d, float x, float y, float z, float heading)
 	memset(equipment, 0, sizeof(equipment));
 
 	SetMercID(0);
-	SetStance(EQ::constants::stanceBalanced);
+	SetStance(Stance::Balanced);
 	rest_timer.Disable();
 
 	if (GetClass() == Class::Rogue)
@@ -1191,13 +1192,13 @@ void Merc::AI_Process() {
 							Attack(GetTarget(), EQ::invslot::slotPrimary, true);
 						}
 
-						if(GetOwner() && GetTarget() && GetSpecialAbility(SPECATK_TRIPLE)) {
+						if(GetOwner() && GetTarget() && GetSpecialAbility(SpecialAbility::TripleAttack)) {
 							tripleSuccess = true;
 							Attack(GetTarget(), EQ::invslot::slotPrimary, true);
 						}
 
 						//quad attack, does this belong here??
-						if(GetOwner() && GetTarget() && GetSpecialAbility(SPECATK_QUAD)) {
+						if(GetOwner() && GetTarget() && GetSpecialAbility(SpecialAbility::QuadrupleAttack)) {
 							Attack(GetTarget(), EQ::invslot::slotPrimary, true);
 						}
 					}
@@ -1499,7 +1500,7 @@ bool Merc::AI_IdleCastCheck() {
 
 bool EntityList::Merc_AICheckCloseBeneficialSpells(Merc* caster, uint8 iChance, float iRange, uint32 iSpellTypes) {
 
-	if((iSpellTypes & SPELL_TYPES_DETRIMENTAL) != 0) {
+	if ((iSpellTypes & SPELL_TYPES_DETRIMENTAL) != 0) {
 		//according to live, you can buff and heal through walls...
 		//now with PCs, this only applies if you can TARGET the target, but
 		// according to Rogean, Live NPCs will just cast through walls/floors, no problem..
@@ -1888,7 +1889,7 @@ bool Merc::AICastSpell(int8 iChance, uint32 iSpellTypes) {
 
 									selectedMercSpell = GetBestMercSpellForAENuke(this, tar);
 
-									if(selectedMercSpell.spellid == 0 && !tar->GetSpecialAbility(UNSTUNABLE) && !tar->IsStunned()) {
+									if(selectedMercSpell.spellid == 0 && !tar->GetSpecialAbility(SpecialAbility::StunImmunity) && !tar->IsStunned()) {
 										uint8 stunChance = 15;
 										if(zone->random.Roll(stunChance)) {
 											selectedMercSpell = GetBestMercSpellForStun(this);
@@ -3192,13 +3193,13 @@ MercSpell Merc::GetBestMercSpellForAENuke(Merc* caster, Mob* tar) {
 
 		switch(caster->GetStance())
 		{
-		case EQ::constants::stanceBurnAE:
+		case Stance::AEBurn:
 			initialCastChance = 50;
 			break;
-		case EQ::constants::stanceBalanced:
+		case Stance::Balanced:
 			initialCastChance = 25;
 			break;
-		case EQ::constants::stanceBurn:
+		case Stance::Burn:
 			initialCastChance = 0;
 			break;
 		}
@@ -3244,11 +3245,11 @@ MercSpell Merc::GetBestMercSpellForTargetedAENuke(Merc* caster, Mob* tar) {
 
 	switch(caster->GetStance())
 	{
-	case EQ::constants::stanceBurnAE:
+	case Stance::AEBurn:
 		numTargetsCheck = 1;
 		break;
-	case EQ::constants::stanceBalanced:
-	case EQ::constants::stanceBurn:
+	case Stance::Balanced:
+	case Stance::Burn:
 		numTargetsCheck = 2;
 		break;
 	}
@@ -3298,11 +3299,11 @@ MercSpell Merc::GetBestMercSpellForPBAENuke(Merc* caster, Mob* tar) {
 
 	switch(caster->GetStance())
 	{
-	case EQ::constants::stanceBurnAE:
+	case Stance::AEBurn:
 		numTargetsCheck = 2;
 		break;
-	case EQ::constants::stanceBalanced:
-	case EQ::constants::stanceBurn:
+	case Stance::Balanced:
+	case Stance::Burn:
 		numTargetsCheck = 3;
 		break;
 	}
@@ -3351,11 +3352,11 @@ MercSpell Merc::GetBestMercSpellForAERainNuke(Merc* caster, Mob* tar) {
 
 	switch(caster->GetStance())
 	{
-	case EQ::constants::stanceBurnAE:
+	case Stance::AEBurn:
 		numTargetsCheck = 1;
 		break;
-	case EQ::constants::stanceBalanced:
-	case EQ::constants::stanceBurn:
+	case Stance::Balanced:
+	case Stance::Burn:
 		numTargetsCheck = 2;
 		break;
 	}
@@ -4078,12 +4079,6 @@ bool Merc::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillT
 
 	Save();
 
-	//no corpse, no exp if we're a merc.
-	//We'll suspend instead, since that's what live does.
-	//Not actually sure live supports 'depopping' merc corpses.
-	//if(entity_list.GetCorpseByID(GetID()))
-	//      entity_list.GetCorpseByID(GetID())->Depop();
-
 	// If client is in zone, suspend merc, else depop it.
 	if (!Suspend()) {
 		Depop();
@@ -4671,7 +4666,6 @@ bool Merc::Spawn(Client *owner) {
 
 	//UpdateMercAppearance();
 
-
 	return true;
 }
 
@@ -5186,12 +5180,9 @@ void Client::SpawnMerc(Merc* merc, bool setMaxStats) {
 	merc->SetSuspended(false);
 	SetMerc(merc);
 	merc->Unsuspend(setMaxStats);
-	merc->SetStance((EQ::constants::StanceType)GetMercInfo().Stance);
+	merc->SetStance(GetMercInfo().Stance);
 
 	Log(Logs::General, Logs::Mercenaries, "SpawnMerc Success for %s.", GetName());
-
-	return;
-
 }
 
 bool Merc::Suspend() {
@@ -5913,4 +5904,20 @@ uint32 Merc::CalcUpkeepCost(uint32 templateID , uint8 level, uint8 currency_type
 	}
 
 	return cost;
+}
+
+void Merc::Signal(int signal_id)
+{
+	if (parse->MercHasQuestSub(EVENT_SIGNAL)) {
+		parse->EventMerc(EVENT_SIGNAL, this, nullptr, std::to_string(signal_id), 0);
+	}
+}
+
+void Merc::SendPayload(int payload_id, std::string payload_value)
+{
+	if (parse->MercHasQuestSub(EVENT_PAYLOAD)) {
+		const auto& export_string = fmt::format("{} {}", payload_id, payload_value);
+
+		parse->EventMerc(EVENT_PAYLOAD, this, nullptr, export_string, 0);
+	}
 }

@@ -20,12 +20,14 @@
 #include "../common/events/player_event_logs.h"
 #include "../common/repositories/trader_repository.h"
 #include "../common/repositories/character_parcels_repository.h"
+#include "../common/repositories/character_parcels_containers_repository.h"
 #include "worldserver.h"
 #include "string_ids.h"
 #include "client.h"
 #include "../common/ruletypes.h"
 
 extern WorldServer worldserver;
+extern QueryServ  *QServ;
 
 void Client::SendBulkParcels()
 {
@@ -106,7 +108,7 @@ void Client::SendBulkParcels()
 	}
 }
 
-void Client::SendParcel(const Parcel_Struct &parcel_in)
+void Client::SendParcel(Parcel_Struct &parcel_in)
 {
 	auto results = CharacterParcelsRepository::GetWhere(
 		database,
@@ -277,6 +279,19 @@ void Client::DoParcelSend(const Parcel_Struct *parcel_in)
 		return;
 	}
 
+	if (parcel_in->money_flag && parcel_in->item_slot != INVALID_INDEX) {
+		Message(
+			Chat::Yellow,
+			fmt::format(
+				"{} tells you, 'I am confused!  Do you want to send money or an item?'",
+				merchant->GetCleanName()
+			).c_str()
+		);
+		DoParcelCancel();
+		SendParcelAck();
+		return;
+	}
+
 	auto num_of_parcels = GetParcelCount();
 	if (num_of_parcels >= RuleI(Parcel, ParcelMaxItems)) {
 		SendParcelIconStatus();
@@ -403,7 +418,29 @@ void Client::DoParcelSend(const Parcel_Struct *parcel_in)
 				return;
 			}
 
-			RemoveItem(parcel_out.item_id, parcel_out.quantity);
+			std::vector<CharacterParcelsContainersRepository::CharacterParcelsContainers> all_entries{};
+			if (inst->IsNoneEmptyContainer()) {
+				for (auto const &kv: *inst->GetContents()) {
+					CharacterParcelsContainersRepository::CharacterParcelsContainers cpc{};
+					cpc.parcels_id = result.id;
+					cpc.slot_id    = kv.first;
+					cpc.item_id    = kv.second->GetID();
+					if (kv.second->IsAugmented()) {
+						auto augs      = kv.second->GetAugmentIDs();
+						cpc.aug_slot_1 = augs.at(0);
+						cpc.aug_slot_2 = augs.at(1);
+						cpc.aug_slot_3 = augs.at(2);
+						cpc.aug_slot_4 = augs.at(3);
+						cpc.aug_slot_5 = augs.at(4);
+						cpc.aug_slot_6 = augs.at(5);
+					}
+					cpc.quantity   = kv.second->GetCharges() > 0 ? kv.second->GetCharges() : 1;
+					all_entries.push_back(cpc);
+				}
+				CharacterParcelsContainersRepository::InsertMany(database, all_entries);
+			}
+
+			RemoveItemBySerialNumber(inst->GetSerialNumber(), parcel_out.quantity);
 			std::unique_ptr<EQApplicationPacket> outapp(new EQApplicationPacket(OP_ShopSendParcel));
 			QueuePacket(outapp.get());
 
@@ -425,16 +462,33 @@ void Client::DoParcelSend(const Parcel_Struct *parcel_in)
 				e.from_player_name = parcel_out.from_name;
 				e.to_player_name   = send_to_client.at(0).character_name;
 				e.item_id          = parcel_out.item_id;
-				e.aug_slot_1       = parcel_out.aug_slot_1;
-				e.aug_slot_2       = parcel_out.aug_slot_2;
-				e.aug_slot_3       = parcel_out.aug_slot_3;
-				e.aug_slot_4       = parcel_out.aug_slot_4;
-				e.aug_slot_5       = parcel_out.aug_slot_5;
-				e.aug_slot_6       = parcel_out.aug_slot_6;
+				e.augment_1_id     = parcel_out.aug_slot_1;
+				e.augment_2_id     = parcel_out.aug_slot_2;
+				e.augment_3_id     = parcel_out.aug_slot_3;
+				e.augment_4_id     = parcel_out.aug_slot_4;
+				e.augment_5_id     = parcel_out.aug_slot_5;
+				e.augment_6_id     = parcel_out.aug_slot_6;
 				e.quantity         = parcel_out.quantity;
 				e.sent_date        = parcel_out.sent_date;
 
 				RecordPlayerEventLog(PlayerEvent::PARCEL_SEND, e);
+
+				if (!all_entries.empty()) {
+					for (auto const &i: all_entries) {
+						e.from_player_name = parcel_out.from_name;
+						e.to_player_name   = send_to_client.at(0).character_name;
+						e.item_id          = i.item_id;
+						e.augment_1_id     = i.aug_slot_1;
+						e.augment_2_id     = i.aug_slot_2;
+						e.augment_3_id     = i.aug_slot_3;
+						e.augment_4_id     = i.aug_slot_4;
+						e.augment_5_id     = i.aug_slot_5;
+						e.augment_6_id     = i.aug_slot_6;
+						e.quantity         = i.quantity;
+						e.sent_date        = parcel_out.sent_date;
+						RecordPlayerEventLog(PlayerEvent::PARCEL_SEND, e);
+					}
+				}
 			}
 
 			Parcel_Struct ps{};
@@ -578,7 +632,13 @@ void Client::DoParcelRetrieve(const ParcelRetrieve_Struct &parcel_in)
 		return;
 	}
 
-	auto p = m_parcels.find(parcel_in.parcel_slot_id);
+	auto p = std::find_if(
+		m_parcels.begin(),
+		m_parcels.end(),
+		[&](const std::pair<uint32, CharacterParcelsRepository::CharacterParcels> &x) {
+			return x.first == parcel_in.parcel_slot_id && x.second.item_id == parcel_in.parcel_item_id;
+		}
+	);
 	if (p != m_parcels.end()) {
 		uint32 item_id       = parcel_in.parcel_item_id;
 		uint32 item_quantity = p->second.quantity;
@@ -602,25 +662,70 @@ void Client::DoParcelRetrieve(const ParcelRetrieve_Struct &parcel_in)
 			p->second.aug_slot_6
 		)
 		);
+
 		if (!inst) {
 			SendParcelRetrieveAck();
 			return;
+		}
+
+		if (inst->IsStackable()) {
+			inst->SetCharges(item_quantity > 0 ? item_quantity : 1);
 		}
 
 		switch (parcel_in.parcel_item_id) {
 			case PARCEL_MONEY_ITEM_ID: {
 				AddMoneyToPP(p->second.quantity, true);
 				MessageString(
-					Chat::Yellow,
-					PARCEL_DELIVERED,
-					merchant->GetCleanName(),
-					"Money",
-					p->second.from_name.c_str()
+					Chat::Yellow, PARCEL_DELIVERED, merchant->GetCleanName(), "Money", p->second.from_name.c_str()
 				);
 				break;
 			}
 			default: {
-				auto free_id = GetInv().FindFreeSlot(false, false);
+				std::vector<CharacterParcelsContainersRepository::CharacterParcelsContainers> results{};
+				if (inst->IsClassBag() && inst->GetItem()->BagSlots > 0) {
+					auto contents = inst->GetContents();
+					results       = CharacterParcelsContainersRepository::GetWhere(
+						database, fmt::format("`parcels_id` = {}", p->second.id)
+					);
+					for (auto i: results) {
+						auto item = database.CreateItem(
+							i.item_id,
+							i.quantity,
+							i.aug_slot_1,
+							i.aug_slot_2,
+							i.aug_slot_3,
+							i.aug_slot_4,
+							i.aug_slot_5,
+							i.aug_slot_6
+						);
+
+						if (!item) {
+							SendParcelRetrieveAck();
+							return;
+						}
+
+						if (CheckLoreConflict(item->GetItem())) {
+							if (RuleB(Parcel, DeleteOnDuplicate)) {
+								MessageString(Chat::Yellow, PARCEL_DUPLICATE_DELETE, inst->GetItem()->Name);
+								continue;
+							}
+
+							MessageString(Chat::Yellow, DUP_LORE);
+							SendParcelRetrieveAck();
+							return;
+						}
+
+						contents->emplace(i.slot_id, item);
+					}
+				}
+
+				auto const free_id = GetInv().FindFirstFreeSlotThatFitsItemWithStacking(inst.get());
+				if (free_id == INVALID_INDEX) {
+					SendParcelRetrieveAck();
+					MessageString(Chat::White, PARCEL_INV_FULL, merchant->GetCleanName());
+					return;
+				}
+
 				if (CheckLoreConflict(inst->GetItem())) {
 					if (RuleB(Parcel, DeleteOnDuplicate)) {
 						MessageString(Chat::Yellow, PARCEL_DUPLICATE_DELETE, inst->GetItem()->Name);
@@ -631,82 +736,56 @@ void Client::DoParcelRetrieve(const ParcelRetrieve_Struct &parcel_in)
 						return;
 					}
 				}
-				else if (inst->IsStackable()) {
-					inst->SetCharges(item_quantity);
-					if (TryStacking(inst.get(), ItemPacketTrade, true, false)) {
-						MessageString(
-							Chat::Yellow,
-							PARCEL_DELIVERED_2,
-							merchant->GetCleanName(),
-							std::to_string(item_quantity).c_str(),
-							inst->GetItem()->Name,
-							p->second.from_name.c_str()
-						);
-					}
-					else if (free_id != INVALID_INDEX) {
-						inst->SetCharges(item_quantity);
-						if (PutItemInInventory(free_id, *inst, true)) {
-							MessageString(
-								Chat::Yellow,
-								PARCEL_DELIVERED_2,
-								merchant->GetCleanName(),
-								std::to_string(item_quantity).c_str(),
-								inst->GetItem()->Name,
-								p->second.from_name.c_str()
-							);
-						}
-					}
-					else {
-						MessageString(Chat::Yellow, PARCEL_INV_FULL, merchant->GetCleanName());
-						SendParcelRetrieveAck();
-						return;
-					}
+
+				if (AutoPutLootInInventory(*inst.get(), false, true)) {
+					MessageString(
+						Chat::Yellow,
+						PARCEL_DELIVERED_2,
+						merchant->GetCleanName(),
+						std::to_string(item_quantity).c_str(),
+						inst->GetItem()->Name,
+						p->second.from_name.c_str()
+					);
 				}
-				else if (free_id != INVALID_INDEX) {
-					inst->SetCharges(item_quantity > 0 ? item_quantity : 1);
-					if (PutItemInInventory(free_id, *inst.get(), true)) {
-						MessageString(
-							Chat::Yellow,
-							PARCEL_DELIVERED,
-							merchant->GetCleanName(),
-							inst->GetItem()->Name,
-							p->second.from_name.c_str()
-						);
+
+				if (player_event_logs.IsEventEnabled(PlayerEvent::PARCEL_RETRIEVE)) {
+					PlayerEvent::ParcelRetrieve e{};
+					e.from_player_name = p->second.from_name;
+					e.item_id          = p->second.item_id;
+					e.augment_1_id     = p->second.aug_slot_1;
+					e.augment_2_id     = p->second.aug_slot_2;
+					e.augment_3_id     = p->second.aug_slot_3;
+					e.augment_4_id     = p->second.aug_slot_4;
+					e.augment_5_id     = p->second.aug_slot_5;
+					e.augment_6_id     = p->second.aug_slot_6;
+					e.quantity         = p->second.quantity;
+					e.sent_date        = p->second.sent_date;
+					RecordPlayerEventLog(PlayerEvent::PARCEL_RETRIEVE, e);
+
+					for (auto const &i:results) {
+								e.from_player_name = p->second.from_name;
+								e.item_id          = i.item_id;
+								e.augment_1_id     = i.aug_slot_1;
+								e.augment_2_id     = i.aug_slot_2;
+								e.augment_3_id     = i.aug_slot_3;
+								e.augment_4_id     = i.aug_slot_4;
+								e.augment_5_id     = i.aug_slot_5;
+								e.augment_6_id     = i.aug_slot_6;
+								e.quantity         = i.quantity;
+								e.sent_date        = p->second.sent_date;
+								RecordPlayerEventLog(PlayerEvent::PARCEL_RETRIEVE, e);
+
+
 					}
-					else {
-						MessageString(Chat::Yellow, PARCEL_INV_FULL, merchant->GetCleanName());
-						SendParcelRetrieveAck();
-						return;
-					}
-				}
-				else {
-					MessageString(Chat::Yellow, PARCEL_INV_FULL, merchant->GetCleanName());
-					SendParcelRetrieveAck();
-					return;
 				}
 			}
-		}
-
-		if (player_event_logs.IsEventEnabled(PlayerEvent::PARCEL_RETRIEVE)) {
-			PlayerEvent::ParcelRetrieve e{};
-			e.from_player_name = p->second.from_name;
-			e.item_id          = p->second.item_id;
-			e.aug_slot_1       = p->second.aug_slot_1;
-			e.aug_slot_2       = p->second.aug_slot_2;
-			e.aug_slot_3       = p->second.aug_slot_3;
-			e.aug_slot_4       = p->second.aug_slot_4;
-			e.aug_slot_5       = p->second.aug_slot_5;
-			e.aug_slot_6       = p->second.aug_slot_6;
-			e.quantity         = p->second.quantity;
-			e.sent_date        = p->second.sent_date;
-
-			RecordPlayerEventLog(PlayerEvent::PARCEL_RETRIEVE, e);
 		}
 
 		DeleteParcel(p->second.id);
 		SendParcelDelete(parcel_in);
 		m_parcels.erase(p);
 	}
+
 	SendParcelRetrieveAck();
 	SendParcelIconStatus();
 }
@@ -719,7 +798,6 @@ bool Client::DeleteParcel(uint32 parcel_id)
 		return false;
 	}
 
-	auto it = std::find_if(m_parcels.cbegin(), m_parcels.cend(), [&](const auto &x) { return x.second.id == parcel_id; });
 	SetParcelCount(GetParcelCount() - 1);
 
 	return true;
