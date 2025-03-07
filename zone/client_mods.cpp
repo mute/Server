@@ -1661,7 +1661,7 @@ int64 Client::CalcBaseEndurance()
 		//take all of the sums from above, then multiply by level*0.075
 		base_end += ( bonus_sum * 3 * GetLevel() ) / 40;
 	}
-	return base_end;
+	return 100;
 }
 
 int64 Client::CalcEnduranceRegen(bool bCombat)
