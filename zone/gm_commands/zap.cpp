@@ -7,7 +7,7 @@ void command_zap(Client* c, const Seperator* sep)
 	auto short_name = zone->short_name;
 
 	auto query = fmt::format(
-		"DELETE FROM spawn2 WHERE zone = {}",
+		"DELETE FROM spawn2 WHERE zone = '{}'",
 		short_name
 	);
 	auto results = content_db.QueryDatabase(query);
