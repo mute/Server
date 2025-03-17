@@ -196,6 +196,7 @@ void command_worldshutdown(Client *c, const Seperator *sep);
 void command_wp(Client *c, const Seperator *sep);
 void command_wpadd(Client *c, const Seperator *sep);
 void command_worldwide(Client *c, const Seperator *sep);
+void command_zap(Client *c, const Seperator *sep);
 void command_zone(Client *c, const Seperator *sep);
 void command_zone_instance(Client *c, const Seperator *sep);
 void command_zone_shard(Client *c, const Seperator *sep);
