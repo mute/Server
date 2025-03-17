@@ -926,6 +926,7 @@ void command_bot(Client *c, const Seperator *sep)
 #include "gm_commands/worldwide.cpp"
 #include "gm_commands/wp.cpp"
 #include "gm_commands/wpadd.cpp"
+#include "gm_commands/zap.cpp"
 #include "gm_commands/zone.cpp"
 #include "gm_commands/zonebootup.cpp"
 #include "gm_commands/zoneshutdown.cpp"
