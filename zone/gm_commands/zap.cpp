@@ -20,7 +20,7 @@ void command_zap(Client* c, const Seperator* sep)
 	c->Message(
 		Chat::White,
 		fmt::format(
-			"Removed spawns from ",
+			"Removed spawns from {}",
 			short_name
 		).c_str()
 	);
