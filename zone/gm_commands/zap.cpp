@@ -4,7 +4,7 @@ void command_zap(Client* c, const Seperator* sep)
 {
 	auto zone_id = c->GetZoneID();
 	auto zone = GetZone(zone_id);
-	auto short_name = zone.GetShortName();
+	auto short_name = zone->short_name;
 
 	auto query = fmt::format(
 		"DELETE FROM spawn2 WHERE zone = {}",
