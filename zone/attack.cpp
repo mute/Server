@@ -5961,7 +5961,7 @@ void Mob::ApplyMeleeDamageMods(uint16 skill, int64 &damage, Mob *defender, Extra
 		if (defender->IsOfClientBotMerc() || defender->IsPetOwnerOfClientBot()) {
 			int melee_mitigation_effect = (
 				defender->spellbonuses.MeleeMitigationEffect +
-				EQ::ClampUpper(defender->itembonuses.MeleeMitigationEffect, RuleI(Character, ItemShieldingCap)) +
+				defender->itembonuses.MeleeMitigationEffect +
 				defender->aabonuses.MeleeMitigationEffect
 			);
 
@@ -6696,7 +6696,7 @@ void Mob::CommonOutgoingHitSuccess(Mob* defender, DamageHitInfo &hit, ExtraAttac
 
 	// shielding mod2
 	if (defender->itembonuses.MeleeMitigation)
-		hit.min_damage -= hit.min_damage * defender->itembonuses.MeleeMitigation / 100;
+		hit.min_damage -= hit.min_damage * EQ::ClampUpper(defender->itembonuses.MeleeMitigation, RuleI(Character, ItemShieldingCap)) / 100;
 
 	ApplyMeleeDamageMods(hit.skill, hit.damage_done, defender, opts);
 	min_mod = std::max(min_mod, extra_mincap);
