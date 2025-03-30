@@ -571,7 +571,13 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 						);
 					}
 				}
-				zoneserver_list.SendPacket(pack);
+				if (scm->guilddbid > 0) {
+					zoneserver_list.SendPacketToZonesWithGuild(scm->guilddbid, pack);
+				} else if (scm->chan_num == ChatChannel_GMSAY) {
+					zoneserver_list.SendPacketToZonesWithGMs(pack);
+				} else {
+					zoneserver_list.SendPacket(pack);
+				}
 			}
 
 			break;
@@ -729,13 +735,15 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 				zs = zoneserver_list.FindByID(s->zone_server_id);
 			} else if (s->zone_id) {
 				zs = zoneserver_list.FindByName(ZoneName(s->zone_id));
+			} else if (s->instance_id) {
+				zs = zoneserver_list.FindByInstanceID(s->instance_id);
 			} else {
 				zoneserver_list.SendEmoteMessage(
 					s->admin_name,
 					0,
 					AccountStatus::Player,
 					Chat::White,
-					"Error: SOP_ZoneShutdown: neither ID nor name specified"
+					"Error: SOP_ZoneShutdown: Zone ID, Instance ID, nor Zone Short Name specified"
 				);
 			}
 
