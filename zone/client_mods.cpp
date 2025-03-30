@@ -339,7 +339,7 @@ int64 Client::CalcMaxHP()
 		}
 	}
 
-	return max_hp;
+	return EQ::ClampLower(max_hp, static_cast<int64>(1));
 }
 
 uint32 Mob::GetClassLevelFactor()
