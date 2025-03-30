@@ -591,8 +591,6 @@ void Database::PurgeExpiredInstances()
 	if (RuleB(Zone, StateSavingOnShutdown)) {
 		ZoneStateSpawnsRepository::DeleteWhere(*this, fmt::format("`instance_id` IN ({})", ids));
 	}
-
-	LogInfo("Purged [{}] expired instances.", affected);
 }
 
 void Database::SetInstanceDuration(uint16 instance_id, uint32 new_duration)
