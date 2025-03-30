@@ -1918,6 +1918,7 @@ bool Client::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::Skil
 
 				if (pet && !(FindSpellBookSlotBySpellID(pet->GetPetSpellID()) >= 0 || GetInv().IsClickEffectEquipped(pet->GetPetSpellID()))) {
 					RemovePet(pet);
+					LogError("Removing pet due to missing spell or click effect Spell ID: [{}]", pet->GetPetSpellID());
 				} else {
 					if (pet && pet->GetPetSpellID()) {
 						PetInfo newPetInfo = PetInfo();
