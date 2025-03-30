@@ -5958,10 +5958,10 @@ void Mob::ApplyMeleeDamageMods(uint16 skill, int64 &damage, Mob *defender, Extra
 			damage_bonus_mod -= 5;
 		}
 
-		if (defender->IsOfClientBotMerc() || (defender->HasOwner() && defender->GetOwner()->IsClient())) {
+		if (defender->IsOfClientBotMerc() || defender->IsPetOwnerOfClientBot()) {
 			int melee_mitigation_effect = (
 				defender->spellbonuses.MeleeMitigationEffect +
-				defender->itembonuses.MeleeMitigationEffect +
+				EQ::ClampUpper(defender->itembonuses.MeleeMitigationEffect, RuleI(Character, ItemShieldingCap)) +
 				defender->aabonuses.MeleeMitigationEffect
 			);
 
