@@ -287,7 +287,8 @@ Bazaar::GetSearchResults(
 		trader_items_ids,
 		std::string(search.item_name),
 		field_criteria_items,
-		where_criteria_items
+		where_criteria_items,
+		search.max_results
 	);
 
 	if (item_results.empty()) {
