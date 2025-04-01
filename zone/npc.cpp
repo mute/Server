@@ -2457,9 +2457,11 @@ Client* NPC::DoPetCommandChecks(int pet_command_id) {
 		return nullptr;
 	}
 
+	/*
 	if (GetPetType() == petAnimation && !aabonuses.PetCommands[pet_command_id]) {
 		return nullptr;
 	}
+	*/
 
 	if (GetPetType() == petFamiliar) {
 		return nullptr;
