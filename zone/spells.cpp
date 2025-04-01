@@ -4723,7 +4723,7 @@ bool Mob::SpellOnTarget(
 	// resist check - every spell can be resisted, beneficial or not
 	// add: ok this isn't true, eqlive's spell data is fucked up, buffs are
 	// not all unresistable, so changing this to only check certain spells
-	if (IsResistableSpell(spell_id)) {
+	if (IsResistableSpell(spell_id) || IsDispelSpell(spell_id)) {
 		spelltar->BreakInvisibleSpells(); //Any detrimental spell cast on you will drop invisible (can be AOE, non damage ect).
 
 		if (
