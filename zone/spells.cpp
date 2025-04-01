@@ -5597,6 +5597,14 @@ float Mob::ResistSpell(uint8 resist_type, uint16 spell_id, Mob *caster, bool use
 		return 0;
 	}
 
+	if (caster == this) {
+		return 100;
+	}
+
+	if (caster->IsClient() && IsDispelSpell(spell_id) && (IsClient() || IsPetOwnerOfClientBot())) {
+		return 100;
+	}
+
 	if (!spells[spell_id].no_resist && !resist_type == RESIST_NONE) {
 		if(GetSpecialAbility(SpecialAbility::CastingFromRangeImmunity))
 		{
