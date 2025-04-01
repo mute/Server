@@ -13,134 +13,131 @@ void command_petcmd(Client *c, const Seperator *sep) {
         return;
     }
 
-    // Get the command type from first argument
-    std::string command_str = sep->arg[1];
-    int command_code = -1;
-    bool toggle_command = false;
+    // Variables to store parsed commands and targets
+    std::vector<int> command_codes;
+    std::vector<uint8> class_targets;
+    bool all_classes = false;
 
-    // Map command string to command code
-    if (command_str == "attack") {
-        command_code = PET_ATTACK;
-    } else if (command_str == "qattack") {
-        command_code = PET_QATTACK;
-    } else if (command_str == "follow") {
-        command_code = PET_FOLLOWME;
-    } else if (command_str == "guard") {
-        command_code = PET_GUARDHERE;
-    } else if (command_str == "sit") {
-        command_code = PET_SIT;
-    } else if (command_str == "stop") {
-        command_code = PET_STOP;
-    } else if (command_str == "taunt") {
-        command_code = PET_TAUNT;
-        toggle_command = true;
-    } else if (command_str == "hold") {
-        command_code = PET_HOLD;
-        toggle_command = true;
-    } else if (command_str == "ghold") {
-        command_code = PET_GHOLD;
-        toggle_command = true;
-    } else if (command_str == "spellhold") {
-        command_code = PET_SPELLHOLD;
-        toggle_command = true;
-    } else if (command_str == "focus") {
-        command_code = PET_FOCUS;
-        toggle_command = true;
-    } else if (command_str == "back") {
-        command_code = PET_BACKOFF;
-    } else if (command_str == "regroup") {
-        command_code = PET_REGROUP;
-        toggle_command = true;
+    // Process all arguments to identify commands and targets
+    for (int i = 1; i <= sep->argnum; i++) {
+        std::string arg = sep->arg[i];
+
+        // Check if this is a command
+        int command_code = -1;
+        bool toggle_command = false;
+
+        if (arg == "attack") {
+            command_code = PET_ATTACK;
+        } else if (arg == "qattack") {
+            command_code = PET_QATTACK;
+        } else if (arg == "follow") {
+            command_code = PET_FOLLOWME;
+        } else if (arg == "guard") {
+            command_code = PET_GUARDHERE;
+        } else if (arg == "sit") {
+            command_code = PET_SIT;
+        } else if (arg == "stop") {
+            command_code = PET_STOP;
+        } else if (arg == "taunt") {
+            command_code = PET_TAUNT;
+            toggle_command = true;
+        } else if (arg == "hold") {
+            command_code = PET_HOLD;
+            toggle_command = true;
+        } else if (arg == "ghold") {
+            command_code = PET_GHOLD;
+            toggle_command = true;
+        } else if (arg == "spellhold") {
+            command_code = PET_SPELLHOLD;
+            toggle_command = true;
+        } else if (arg == "focus") {
+            command_code = PET_FOCUS;
+            toggle_command = true;
+        } else if (arg == "back") {
+            command_code = PET_BACKOFF;
+        } else if (arg == "regroup") {
+            command_code = PET_REGROUP;
+            toggle_command = true;
+        }
+
+        // If it's a command, check for optional on/off toggle
+        if (command_code != -1) {
+            // Check if next arg is "on" or "off" for toggle commands
+            if (toggle_command && i + 1 <= sep->argnum) {
+                std::string toggle = sep->arg[i + 1];
+                if (toggle == "on") {
+                    // Map to ON command code
+                    if (command_code == PET_SIT) command_code = PET_SITDOWN;
+                    else if (command_code == PET_STOP) command_code = PET_STOP_ON;
+                    else if (command_code == PET_TAUNT) command_code = PET_TAUNT_ON;
+                    else if (command_code == PET_HOLD) command_code = PET_HOLD_ON;
+                    else if (command_code == PET_GHOLD) command_code = PET_GHOLD_ON;
+                    else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_ON;
+                    else if (command_code == PET_FOCUS) command_code = PET_FOCUS_ON;
+                    else if (command_code == PET_REGROUP) command_code = PET_REGROUP_ON;
+                    i++; // Skip the "on" token in next iteration
+                } else if (toggle == "off") {
+                    // Map to OFF command code
+                    if (command_code == PET_SIT) command_code = PET_STANDUP;
+                    else if (command_code == PET_STOP) command_code = PET_STOP_OFF;
+                    else if (command_code == PET_TAUNT) command_code = PET_TAUNT_OFF;
+                    else if (command_code == PET_HOLD) command_code = PET_HOLD_OFF;
+                    else if (command_code == PET_GHOLD) command_code = PET_GHOLD_OFF;
+                    else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_OFF;
+                    else if (command_code == PET_FOCUS) command_code = PET_FOCUS_OFF;
+                    else if (command_code == PET_REGROUP) command_code = PET_REGROUP_OFF;
+                    i++; // Skip the "off" token in next iteration
+                }
+            }
+
+            command_codes.push_back(command_code);
+            continue; // Processed a command, move to next arg
+        }
+
+        // If not a command, check if it's a class target
+        if (arg == "all") {
+            all_classes = true;
+        } else if (arg == "mag") {
+            class_targets.push_back(Class::Magician);
+        } else if (arg == "bst") {
+            class_targets.push_back(Class::Beastlord);
+        } else if (arg == "nec") {
+            class_targets.push_back(Class::Necromancer);
+        } else if (arg == "enc") {
+            class_targets.push_back(Class::Enchanter);
+        } else if (arg == "shm") {
+            class_targets.push_back(Class::Shaman);
+        } else if (arg == "dru") {
+            class_targets.push_back(Class::Druid);
+        } else if (arg == "brd") {
+            class_targets.push_back(Class::Bard);
+        } else if (arg == "shd") {
+            class_targets.push_back(Class::ShadowKnight);
+        }
+        // Ignore unrecognized arguments
     }
 
-    if (command_code == -1) {
+    // If no commands specified, show usage
+    if (command_codes.empty()) {
         c->Message(Chat::White, usage.c_str());
         return;
     }
 
-    // Parse toggle value (on/off) if it's a toggle command
-    int target_arg_start = 2;
-
-    if (toggle_command && sep->argnum >= 2) {
-        std::string toggle = sep->arg[2];
-        if (toggle == "on") {
-            // Map to the appropriate ON command code
-            if (command_code == PET_SIT) command_code = PET_SITDOWN;
-            else if (command_code == PET_STOP) command_code = PET_STOP_ON;
-            else if (command_code == PET_TAUNT) command_code = PET_TAUNT_ON;
-            else if (command_code == PET_HOLD) command_code = PET_HOLD_ON;
-            else if (command_code == PET_GHOLD) command_code = PET_GHOLD_ON;
-            else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_ON;
-            else if (command_code == PET_FOCUS) command_code = PET_FOCUS_ON;
-            else if (command_code == PET_REGROUP) command_code = PET_REGROUP_ON;
-            target_arg_start = 3;
-        } else if (toggle == "off") {
-            // Map to the appropriate OFF command code
-            if (command_code == PET_SIT) command_code = PET_STANDUP;
-            else if (command_code == PET_STOP) command_code = PET_STOP_OFF;
-            else if (command_code == PET_TAUNT) command_code = PET_TAUNT_OFF;
-            else if (command_code == PET_HOLD) command_code = PET_HOLD_OFF;
-            else if (command_code == PET_GHOLD) command_code = PET_GHOLD_OFF;
-            else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_OFF;
-            else if (command_code == PET_FOCUS) command_code = PET_FOCUS_OFF;
-            else if (command_code == PET_REGROUP) command_code = PET_REGROUP_OFF;
-            target_arg_start = 3;
-        }
-    }
-
-    // Parse class targets
-    std::vector<uint8> class_targets;
-    bool all_classes = false;
-
-    // If no target specified, default to all classes
-    if (sep->argnum < target_arg_start) {
+    // If no classes specified, default to all
+    if (class_targets.empty() && !all_classes) {
         all_classes = true;
-    } else {
-        // Check if the target is "all"
-        if (strcmp(sep->arg[target_arg_start], "all") == 0) {
-            all_classes = true;
-        } else {
-            // Process class abbreviations
-            bool found_any_class = false;
-            for (int i = target_arg_start; i <= sep->argnum; i++) {
-                if (strcmp(sep->arg[i], "mag") == 0) {
-                    class_targets.push_back(Class::Magician);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "bst") == 0) {
-                    class_targets.push_back(Class::Beastlord);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "nec") == 0) {
-                    class_targets.push_back(Class::Necromancer);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "enc") == 0) {
-                    class_targets.push_back(Class::Enchanter);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "shm") == 0) {
-                    class_targets.push_back(Class::Shaman);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "dru") == 0) {
-                    class_targets.push_back(Class::Druid);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "brd") == 0) {
-                    class_targets.push_back(Class::Bard);
-                    found_any_class = true;
-                } else if (strcmp(sep->arg[i], "shd") == 0) {
-                    class_targets.push_back(Class::ShadowKnight);
-                    found_any_class = true;
-                }
-            }
+    }
 
-            // If no valid class identifier was found, default to 'all'
-            if (!found_any_class) {
-                all_classes = true;
+    // Execute all commands on matching pets
+    for (auto pet : c->GetAllPets()) {
+        auto pet_class_id = pet->CastToNPC()->GetPetOriginClass();
+
+        // Check if this pet's class matches our targets
+        if (all_classes || std::find(class_targets.begin(), class_targets.end(), pet_class_id) != class_targets.end()) {
+            // Execute all commands on this pet
+            for (int cmd : command_codes) {
+                pet->CastToNPC()->DoPetCommand(cmd, c->GetTarget());
             }
         }
     }
-
-	for (auto pet : c->GetAllPets()) {
-		auto pet_class_id = pet->CastToNPC()->GetPetOriginClass();
-		if (all_classes || std::find(class_targets.begin(), class_targets.end(), pet_class_id) != class_targets.end()) {
-			pet->CastToNPC()->DoPetCommand(command_code, c->GetTarget());
-		}
-	}
 }
