@@ -545,7 +545,7 @@ bool Client::Process() {
 			}
 		}
 
-		if ((AutoFireEnabled() || AutoAttackEnabled()) && auto_attack_target != nullptr && may_use_attacks && attack_autoskill_timer.Check()) {
+		if ((AutoFireEnabled() || AutoAttackEnabled()) && auto_attack_target != nullptr && may_use_attacks && attack_autoskill_timer.Check() && !auto_attack_target->IsClient()) {
 			for (const auto skill : GetAvailableAutoSkills()) {
 				if (GetAutoSkillStatus(skill)) {
 					SetEntityVariable("auto_skill", "enabled");
