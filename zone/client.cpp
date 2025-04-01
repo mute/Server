@@ -3566,16 +3566,20 @@ void Client::ReadBook(BookRequest_Struct* book)
 		std::string item_text = b.text;
 		auto discovered_by = GetDiscoverer(item_id);
 
-
-		if (item_id >= 700000 && !discovered_by.empty()) {
-			if (!item_text.empty()) {
-				item_text += "<br>";
-			}
-			item_text += fmt::format("Discovered By: {}<br>", discovered_by);
+		if (!item_text.empty()) {
+			item_text += "<br>";
 		}
 
 		if (item_id < 999999 && item_name.find("Fine Steel") == 0) {
 			item_text += fmt::format("Discovered By: {}<br>", "Enchanted Loom");
+		}
+
+		else if (item_id % 1000000 == 10001) {
+			item_text += fmt::format("Discovered By: {}<br>", "VarietyVoid");
+		}
+
+		else if (item_id >= 700000 && !discovered_by.empty()) {
+			item_text += fmt::format("Discovered By: {}<br>", discovered_by);
 		}
 
 		b.text = item_text.c_str();
