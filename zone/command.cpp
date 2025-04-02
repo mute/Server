@@ -233,6 +233,7 @@ int command_init(void)
 		command_add("task", "(subcommand) - Task system commands", AccountStatus::GMLeadAdmin, command_task) ||
 		command_add("petname", "[newname] - Temporarily renames your pet. Leave name blank to restore the original name.", AccountStatus::GMAdmin, command_petname) ||
 		command_add("traindisc", "[level] - Trains all the disciplines usable by the target, up to level specified. (may freeze client for a few seconds)", AccountStatus::GMLeadAdmin, command_traindisc) ||
+		command_add("tim", "Toggle Improved Models", AccountStatus::Player, command_toggleimprovedmodels) ||
 		command_add("tune", "Calculate statistical values related to combat.", AccountStatus::GMAdmin, command_tune) ||
 		command_add("undye", "Remove dye from all of your or your target's armor slots", AccountStatus::GMAdmin, command_undye) ||
 		command_add("unmemspell", "[Spell ID] - Unmemorize a Spell by ID for you or your target", AccountStatus::Guide, command_unmemspell) ||
