@@ -72,14 +72,13 @@ void command_petcmd(Client *c, const Seperator *sep) {
             command_code = PET_FEIGN;
         }
 
-        // If it's a command, check for optional on/off toggle
         if (command_code != -1) {
-            // Check if next arg is "on" or "off" for toggle commands
+            // If it's a command, check for optional on/off toggle
             if (toggle_command && i + 1 <= sep->argnum && sep->arg[i + 1]) {
-                std::string toggle = sep->arg[i + 1];
+                std::string next_arg = sep->arg[i + 1];
 
-                // Only process if it's exactly "on" or "off" - no special handling for malformed input
-                if (toggle == "on") {
+                // Check if next arg is "on" or "off" or another valid command/class
+                if (next_arg == "on") {
                     // Map to ON command code
                     if (command_code == PET_SIT) command_code = PET_SITDOWN;
                     else if (command_code == PET_STOP) command_code = PET_STOP_ON;
@@ -90,7 +89,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
                     else if (command_code == PET_FOCUS) command_code = PET_FOCUS_ON;
                     else if (command_code == PET_REGROUP) command_code = PET_REGROUP_ON;
                     i++; // Skip the "on" token in next iteration
-                } else if (toggle == "off") {
+                } else if (next_arg == "off") {
                     // Map to OFF command code
                     if (command_code == PET_SIT) command_code = PET_STANDUP;
                     else if (command_code == PET_STOP) command_code = PET_STOP_OFF;
@@ -102,7 +101,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
                     else if (command_code == PET_REGROUP) command_code = PET_REGROUP_OFF;
                     i++; // Skip the "off" token in next iteration
                 }
-                // Any other value is ignored - no special handling needed
+                // Any other value is treated as a separate command/class - don't increment i
             }
 
             command_codes.push_back(command_code);
