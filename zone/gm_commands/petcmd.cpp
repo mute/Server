@@ -1,6 +1,6 @@
 void command_petcmd(Client *c, const Seperator *sep) {
-    // More robust null checks - ensure both the pointers and their required members are valid
-    if (!c || !sep || !sep->arg || sep->argnum < 0) {
+    // Basic null pointer checks
+    if (!c || !sep) {
         return;
     }
 
@@ -19,9 +19,9 @@ void command_petcmd(Client *c, const Seperator *sep) {
 
     // Process all arguments to identify commands and targets
     for (int i = 1; i <= sep->argnum; i++) {
-        // Additional check to ensure this argument exists
+        // Skip any null arguments
         if (!sep->arg[i]) {
-            continue;  // Skip this argument if it's NULL
+            continue;
         }
 
         std::string arg = sep->arg[i];
@@ -75,8 +75,10 @@ void command_petcmd(Client *c, const Seperator *sep) {
         // If it's a command, check for optional on/off toggle
         if (command_code != -1) {
             // Check if next arg is "on" or "off" for toggle commands
-            if (toggle_command && i + 1 <= sep->argnum && sep->arg[i + 1]) {  // Added NULL check for sep->arg[i + 1]
+            if (toggle_command && i + 1 <= sep->argnum && sep->arg[i + 1]) {
                 std::string toggle = sep->arg[i + 1];
+
+                // Only process if it's exactly "on" or "off" - no special handling for malformed input
                 if (toggle == "on") {
                     // Map to ON command code
                     if (command_code == PET_SIT) command_code = PET_SITDOWN;
@@ -100,6 +102,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
                     else if (command_code == PET_REGROUP) command_code = PET_REGROUP_OFF;
                     i++; // Skip the "off" token in next iteration
                 }
+                // Any other value is ignored - no special handling needed
             }
 
             command_codes.push_back(command_code);
@@ -142,6 +145,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
         } else if (arg == "ber" || arg == "berserker") {
             class_targets.push_back(Class::Berserker);
         }
+        // If it's neither a command nor a class, silently ignore it
     }
 
     // If no commands specified, show usage
@@ -155,7 +159,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
         all_classes = true;
     }
 
-    // Additional safety check to ensure GetAllPets is valid
+    // Get the list of pets - safely handle null/empty cases
     auto pets = c->GetAllPets();
     if (pets.empty()) {
         c->Message(Chat::White, "You don't have any pets under your control.");
@@ -164,7 +168,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
 
     // Execute all commands on matching pets
     for (auto pet : pets) {
-        // Safety check to ensure pet is valid and is an NPC
+        // Skip invalid pets
         if (!pet || !pet->IsNPC()) {
             continue;
         }
