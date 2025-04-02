@@ -150,8 +150,6 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 
 			if (!found) {
 				cse->Class = e.class_; // Fallback to default class if not found
-			} else 	if ((pp.classes & GetPlayerClassBit(Class::Monk)) && (e.race == Race::Human || e.race == Race::Iksar)) {
-				cse->Class = Class::Monk;
 			} else {
 				// Extract class IDs from the bitmask
 				std::vector<uint32> class_ids;
@@ -168,7 +166,10 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 				} else {
 					cse->Class = 0xFFFF; // Fallback if no classes were found in bitmask
 				}
-				cse->Deity = pp.classes > 0 ? pp.classes : GetPlayerClassBit(cse->Class);
+				cse->Deity = pp.classes;
+				if ((pp.classes & GetPlayerClassBit(Class::Monk)) && (e.race == Race::Human || e.race == Race::Iksar)) {
+					cse->Class = Class::Monk;
+				}
 			}
 		} else {
 			cse->Class = e.class_;
