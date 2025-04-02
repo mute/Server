@@ -3611,6 +3611,9 @@ int64_t Client::GetStatEntryValue(StatEntry label)
 			}
 			return tracking_distance;
 		}
+		case statAttackMode: {
+			return static_cast<int>(GetAttackMode());
+		}
 		default:
 			return 0;
 	}

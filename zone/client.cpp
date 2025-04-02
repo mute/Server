@@ -12538,13 +12538,10 @@ void Client::SetWeaponAppearance()
 
 const Client::AttackMode Client::GetAttackMode()
 {
-	LogDebug("Getting m_attack_mode [{}] from Cache...", (int) m_attack_mode);
-	if (m_attack_mode == UNDEFINED) {
-		LogDebug("m_attack_mode [{}] undefined...", (int) m_attack_mode);
+	if (m_attack_mode <= UNDEFINED || m_attack_mode > RANGED) {
 		m_attack_mode = (AttackMode) Strings::ToInt(GetBucket("attack_mode"), 1);
 	}
 
-	LogDebug("Returning m_attack_mode [{}]", (int) m_attack_mode);
 	return m_attack_mode;
 }
 

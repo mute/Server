@@ -2247,7 +2247,7 @@ private:
 	int sent_inventory;
 
 	Timer m_initial_wc;
-	Client::AttackMode m_attack_mode;
+	Client::AttackMode m_attack_mode = AttackMode::UNDEFINED;
 
 	// https://github.com/EQEmu/Server/pull/2479
 	bool m_lock_save_position = false;
