@@ -1064,7 +1064,7 @@ void Client::BulkSendMerchantInventory(int merchant_id, int npcid) {
 				}
 
 				if (RuleB(Merchant, UsePriceMod)) {
-					item_price *= Client::CalcPriceMod(npc);
+					item_price *= EQ::ClampLower(Client::CalcPriceMod(npc), 1.0f);
 				}
 
 				inst->SetCharges(item_charges);

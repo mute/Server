@@ -13736,6 +13736,8 @@ void Client::Handle_OP_ShopPlayerBuy(const EQApplicationPacket *app)
 		single_price *= Client::CalcPriceMod(tmp, false);
 	}
 
+	single_price = EQ::ClampLower(single_price, 1);
+
 	if (item->MaxCharges > 1) {
 		mpo->price = single_price;
 	} else {
