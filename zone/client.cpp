@@ -12550,6 +12550,7 @@ void Client::SetAttackMode(Client::AttackMode mode)
 	m_attack_mode = mode;
 	SetBucket("attack_mode", std::to_string((int) mode));
 	SetWeaponAppearance();
+	SendBulkStatsUpdate();
 }
 
 void Client::SetGMStatus(int new_status) {
