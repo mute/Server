@@ -110,6 +110,11 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 		buckets = DataBucketsRepository::GetWhere(database, "`key` = 'GestaltClasses' AND character_id IN (" + Strings::Join(character_ids, ",") + ")");
 	}
 
+	std::vector<DataBucketsRepository::DataBuckets> attackmode_buckets = {};
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		attackmode_buckets = DataBucketsRepository::GetWhere(database, "`key` = 'attack_mode' AND character_id IN (" + Strings::Join(character_ids, ",") + ")");
+	}
+
 	size_t packet_size = sizeof(CharacterSelect_Struct) + (sizeof(CharacterSelectEntry_Struct) * character_count);
 	*out_app = new EQApplicationPacket(OP_SendCharInfo, packet_size);
 
@@ -372,6 +377,32 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 			const EQ::ItemInstance *inst          = nullptr;
 			int16                  inventory_slot = 0;
 
+			// Check if this character has attack_mode '2'
+			// if they do, we will display NOTHING for matslot == weaponPrimary and for matslot == weaponSecondary
+			// we will display the item_id_file (or ornament) for EQ::invslot::slotRanged
+			bool is_attack_mode_2 = false;
+			int  ranged_weapon_gfx = 0;
+			for (auto &b : attackmode_buckets) {
+				if (b.character_id == e.id && b.value == "2") {
+					is_attack_mode_2 = true;
+					auto ranged_inst = inv.GetItem(EQ::invslot::slotRange);
+					if (ranged_inst) {
+						const auto ranged_item = ranged_inst->GetItem();
+						if (ranged_item) {
+							// First check if there's an ornament ID
+							if (ranged_inst->GetOrnamentationIDFile() != 0) {
+								ranged_weapon_gfx = ranged_inst->GetOrnamentationIDFile();
+							}
+							// Otherwise use the item's IDFile if valid
+							else if (strlen(ranged_item->IDFile) > 2) {
+								ranged_weapon_gfx = Strings::ToInt(&ranged_item->IDFile[2]);
+							}
+						}
+					}
+					break;
+				}
+			}
+
 			for (uint32 matslot = EQ::textures::textureBegin; matslot < EQ::textures::materialCount; matslot++) {
 				inventory_slot = EQ::InventoryProfile::CalcSlotFromMaterial(matslot);
 				if (inventory_slot == INVALID_INDEX) { continue; }
@@ -418,6 +449,14 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 					cse->Equip[matslot].HerosForgeModel = inst->GetOrnamentHeroModel(matslot);
 					cse->Equip[matslot].Color           = color;
 				}
+			}
+
+			// After processing all slots, override weapon display for attack_mode 2 characters
+			if (is_attack_mode_2) {
+				cse->Equip[EQ::textures::weaponPrimary].Material = 0;
+				cse->PrimaryIDFile = 0;
+				cse->Equip[EQ::textures::weaponSecondary].Material = ranged_weapon_gfx;
+				cse->SecondaryIDFile = ranged_weapon_gfx;
 			}
 		}
 		else {
