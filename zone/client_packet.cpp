@@ -13579,11 +13579,9 @@ void Client::Handle_OP_Shielding(const EQApplicationPacket *app)
 		return;
 	}
 
-	if (GetLevel() < 30) { //Client gives message
-		return;
-	}
-
-	if (GetClass() != Class::Warrior){
+	if (GetLevel() < 30 || !HasClass(Class::Warrior)) {
+		LogDebugDetail("Invalid level or for /shield");
+		MessageString(Chat::Skills, 4033);
 		return;
 	}
 
