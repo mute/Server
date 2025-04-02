@@ -5,7 +5,7 @@ void command_petcmd(Client *c, const Seperator *sep) {
         return;
     }
 
-    std::string usage = "Usage: #petcmd [attack, qattack, follow, guard, sit, stop, taunt (on\\off), hold (on\\off), ghold (on\\off), spellhold (on\\off), focus (on\\off), back, regroup (on\\off)] [all, mag, bst, nec, enc, shm, dru, brd, shd].";
+	std::string usage = "Usage: #petcmd [attack, qattack, follow, guard, sit, stop, taunt (on\\off), hold (on\\off), ghold (on\\off), spellhold (on\\off), focus (on\\off), back, regroup (on\\off), health, leader, feign, leave] [all, mag, bst, nec, enc, shm, dru, brd, shd]. Verbs do not need to be applied in any specific order.";
 
     // Check if we have at least one argument
     if (sep->argnum < 1) {
@@ -26,39 +26,47 @@ void command_petcmd(Client *c, const Seperator *sep) {
         int command_code = -1;
         bool toggle_command = false;
 
-        if (arg == "attack") {
-            command_code = PET_ATTACK;
-        } else if (arg == "qattack") {
-            command_code = PET_QATTACK;
-        } else if (arg == "follow") {
-            command_code = PET_FOLLOWME;
-        } else if (arg == "guard") {
-            command_code = PET_GUARDHERE;
-        } else if (arg == "sit") {
-            command_code = PET_SIT;
-        } else if (arg == "stop") {
-            command_code = PET_STOP;
-        } else if (arg == "taunt") {
-            command_code = PET_TAUNT;
-            toggle_command = true;
-        } else if (arg == "hold") {
-            command_code = PET_HOLD;
-            toggle_command = true;
-        } else if (arg == "ghold") {
-            command_code = PET_GHOLD;
-            toggle_command = true;
-        } else if (arg == "spellhold") {
-            command_code = PET_SPELLHOLD;
-            toggle_command = true;
-        } else if (arg == "focus") {
-            command_code = PET_FOCUS;
-            toggle_command = true;
-        } else if (arg == "back") {
-            command_code = PET_BACKOFF;
-        } else if (arg == "regroup") {
-            command_code = PET_REGROUP;
-            toggle_command = true;
-        }
+		if (arg == "attack") {
+			command_code = PET_ATTACK;
+		} else if (arg == "qattack") {
+			command_code = PET_QATTACK;
+		} else if (arg == "follow" || arg == "followme") {
+			command_code = PET_FOLLOWME;
+		} else if (arg == "guard") {
+			command_code = PET_GUARDHERE;
+		} else if (arg == "sit") {
+			command_code = PET_SIT;
+		} else if (arg == "stop" || arg == "freeze") {
+			command_code = PET_STOP;
+		} else if (arg == "taunt") {
+			command_code = PET_TAUNT;
+			toggle_command = true;
+		} else if (arg == "hold") {
+			command_code = PET_HOLD;
+			toggle_command = true;
+		} else if (arg == "ghold") {
+			command_code = PET_GHOLD;
+			toggle_command = true;
+		} else if (arg == "spellhold" || arg == "nocast") {
+			command_code = PET_SPELLHOLD;
+			toggle_command = true;
+		} else if (arg == "focus") {
+			command_code = PET_FOCUS;
+			toggle_command = true;
+		} else if (arg == "back" || arg == "backoff") {
+			command_code = PET_BACKOFF;
+		} else if (arg == "regroup") {
+			command_code = PET_REGROUP;
+			toggle_command = true;
+		} else if (arg == "leave" || arg == "dismiss" || arg == "getlost") {
+			command_code = PET_GETLOST;
+		} else if (arg == "health" || arg == "healthreport" || arg == "hp") {
+			command_code = PET_HEALTHREPORT;
+		} else if (arg == "leader" || arg == "master") {
+			command_code = PET_LEADER;
+		} else if (arg == "feign" || arg == "fd" || arg == "playdead") {
+			command_code = PET_FEIGN;
+		}
 
         // If it's a command, check for optional on/off toggle
         if (command_code != -1) {
@@ -94,27 +102,42 @@ void command_petcmd(Client *c, const Seperator *sep) {
             continue; // Processed a command, move to next arg
         }
 
-        // If not a command, check if it's a class target
-        if (arg == "all") {
-            all_classes = true;
-        } else if (arg == "mag") {
-            class_targets.push_back(Class::Magician);
-        } else if (arg == "bst") {
-            class_targets.push_back(Class::Beastlord);
-        } else if (arg == "nec") {
-            class_targets.push_back(Class::Necromancer);
-        } else if (arg == "enc") {
-            class_targets.push_back(Class::Enchanter);
-        } else if (arg == "shm") {
-            class_targets.push_back(Class::Shaman);
-        } else if (arg == "dru") {
-            class_targets.push_back(Class::Druid);
-        } else if (arg == "brd") {
-            class_targets.push_back(Class::Bard);
-        } else if (arg == "shd") {
-            class_targets.push_back(Class::ShadowKnight);
-        }
-        // Ignore unrecognized arguments
+		// If not a command, check if it's a class target
+		if (arg == "all") {
+			all_classes = true;
+		} else if (arg == "mag" || arg == "mage" || arg == "magician") {
+			class_targets.push_back(Class::Magician);
+		} else if (arg == "bst" || arg == "bl" || arg == "beast" || arg == "beastlord") {
+			class_targets.push_back(Class::Beastlord);
+		} else if (arg == "nec" || arg == "necro" || arg == "necromancer") {
+			class_targets.push_back(Class::Necromancer);
+		} else if (arg == "enc" || arg == "ench" || arg == "enchanter") {
+			class_targets.push_back(Class::Enchanter);
+		} else if (arg == "shm" || arg == "shaman") {
+			class_targets.push_back(Class::Shaman);
+		} else if (arg == "dru" || arg == "druid") {
+			class_targets.push_back(Class::Druid);
+		} else if (arg == "brd" || arg == "bard") {
+			class_targets.push_back(Class::Bard);
+		} else if (arg == "shd" || arg == "sk" || arg == "shadowknight") {
+			class_targets.push_back(Class::ShadowKnight);
+		} else if (arg == "war" || arg == "warrior") {
+			class_targets.push_back(Class::Warrior);
+		} else if (arg == "clr" || arg == "cler" || arg == "cleric") {
+			class_targets.push_back(Class::Cleric);
+		} else if (arg == "pal" || arg == "paladin") {
+			class_targets.push_back(Class::Paladin);
+		} else if (arg == "rng" || arg == "ranger") {
+			class_targets.push_back(Class::Ranger);
+		} else if (arg == "mnk" || arg == "monk") {
+			class_targets.push_back(Class::Monk);
+		} else if (arg == "rog" || arg == "rogue") {
+			class_targets.push_back(Class::Rogue);
+		} else if (arg == "wiz" || arg == "wizard") {
+			class_targets.push_back(Class::Wizard);
+		} else if (arg == "ber" || arg == "berserker") {
+			class_targets.push_back(Class::Berserker);
+		}
     }
 
     // If no commands specified, show usage
