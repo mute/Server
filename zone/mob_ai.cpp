@@ -1234,7 +1234,7 @@ void Mob::AI_Process() {
 
 
 					//SE_PC_Pet_Rampage SPA 464 on pet, chance modifier
-					if ((IsPet() || IsTempPet()) && IsPetOwnerClient()) {
+					if (GetOwner() && IsPetOwnerClient()) {
 						Mob *owner = nullptr;
 						owner = GetOwner();
 

@@ -668,7 +668,7 @@ void Mob::SetPetStop(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_STOP, nState);
 		}
 	}
@@ -687,7 +687,7 @@ void Mob::SetPetRegroup(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_REGROUP, nState);
 		}
 	}
@@ -700,7 +700,7 @@ void Mob::SetHeld(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_HOLD, nState);
 		}
 	}
@@ -717,7 +717,7 @@ void Mob::SetGHeld(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_GHOLD, nState);
 		}
 	}
@@ -734,7 +734,7 @@ void Mob::SetNoCast(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_SPELLHOLD, nState);
 		}
 	}
@@ -747,7 +747,7 @@ void Mob::SetFocused(bool nState) {
 	{
 		Client* owner = GetOwner()->CastToClient();
 
-		if (GetID() == owner->focused_pet_id) {
+		if (owner && GetID() == owner->focused_pet_id) {
 			owner->SetPetCommandState(PET_BUTTON_FOCUS, nState);
 		}
 	}
