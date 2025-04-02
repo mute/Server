@@ -5597,10 +5597,6 @@ float Mob::ResistSpell(uint8 resist_type, uint16 spell_id, Mob *caster, bool use
 		return 0;
 	}
 
-	if (caster == this) {
-		return 100;
-	}
-
 	if (caster->IsClient() && IsDispelSpell(spell_id) && (IsClient() || IsPetOwnerOfClientBot())) {
 		return 100;
 	}
