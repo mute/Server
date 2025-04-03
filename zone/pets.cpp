@@ -123,7 +123,7 @@ void Mob::MakePoweredPet(uint16 spell_id, const char* pettype, int16 petpower,
 	const NPCType *base = content_db.LoadNPCTypesData(record.npc_type);
 	if(base == nullptr) {
 		Message(Chat::Red, "Unable to load NPC data for pet %s", pettype);
-		LogError("Unable to load NPC data for pet [{}] (NPC ID [{}]), check pets and npc_types tables", pettype, record.npc_type);
+		LogError("Unable to load NPC data for pet [{}], (NPC ID [{}]), spell_id [{}], petpower [{}] check pets and npc_types tables", pettype, record.npc_type, spell_id, petpower);
 		return;
 	}
 
