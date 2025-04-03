@@ -115,7 +115,7 @@ void Mob::MakePoweredPet(uint16 spell_id, const char* pettype, int16 petpower,
 	PetRecord record;
 	if(!content_db.GetPoweredPetEntry(pettype, act_power, &record)) {
 		Message(Chat::Red, "Unable to find data for pet %s", pettype);
-		LogError("Unable to find data for pet [{}], check pets table", pettype);
+		LogError("Unable to find data for pet [{}], spell_id [{}], petpower [{}], check pets table", pettype, spell_id, petpower);
 		return;
 	}
 
