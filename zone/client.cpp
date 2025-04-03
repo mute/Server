@@ -4085,7 +4085,7 @@ const bool Client::GetAutoSkillStatus(EQ::skills::SkillType skill_id)
         return it->second;
     }
 
-    std::string bucket_name = fmt::format("autoskill_{}", skill_id);
+    std::string bucket_name = fmt::format("autoskill.{}", skill_id);
     bool status = Strings::ToBool(GetBucket(bucket_name));
 
     m_autoskill[skill_id] = status;
@@ -4099,7 +4099,7 @@ void Client::SetAutoSkillStatus(EQ::skills::SkillType skill_id, bool enabled)
     m_autoskill[skill_id] = enabled;
 
     // Persist to bucket
-    std::string bucket_name = fmt::format("autoskill_{}", skill_id);
+    std::string bucket_name = fmt::format("autoskill.{}", skill_id);
     SetBucket(bucket_name, enabled ? "1" : "0");
 }
 
