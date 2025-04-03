@@ -1161,7 +1161,7 @@ void Mob::AI_Process() {
 				if (!BehindMob(GetTarget(), GetX(), GetY())) {
 					glm::vec3 target_position;
 					PlotPositionAroundTarget(target, target_position.x, target_position.y, target_position.z, true);
-					RunToPrecise(target_position.x, target_position.y, target_position.z);
+					RunTo(target_position.x, target_position.y, target_position.z);
 				}
 			}  else {
 				if (IsMoving()) {
@@ -1493,9 +1493,9 @@ void Mob::AI_Process() {
 								Teleport(target_position);
 							} else {
 								if (running) {
-									RunToPrecise(target_position.x, target_position.y, target_position.z);
+									RunTo(target_position.x, target_position.y, target_position.z);
 								} else {
-									WalkToPrecise(target_position.x, target_position.y, target_position.z);
+									WalkTo(target_position.x, target_position.y, target_position.z);
 								}
 							}
 
