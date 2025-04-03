@@ -1,3 +1,5 @@
+#include "../client.h"
+
 void command_petcmd(Client *c, const Seperator *sep) {
     // Basic null pointer checks
     if (!c || !sep) {
@@ -6,145 +8,126 @@ void command_petcmd(Client *c, const Seperator *sep) {
 
     const std::string usage = "Usage: #petcmd [attack, qattack, follow, guard, sit, stop, taunt (on\\off), hold (on\\off), ghold (on\\off), spellhold (on\\off), focus (on\\off), back, regroup (on\\off), health, leader, feign, leave] [all, mag, bst, nec, enc, shm, dru, brd, shd]. Verbs do not need to be applied in any specific order.";
 
+    // Safely build a vector of args
+    std::vector<std::string> args;
+    // argnum is the index of the last argument, not the count
+    for (uint16 i = 0; i <= sep->argnum && i < sep->GetMaxArgNum(); ++i) {
+        if (sep->arg[i] != nullptr) {
+            args.push_back(sep->arg[i]);
+        }
+    }
+
     // Check if we have at least one argument
-    if (sep->argnum < 1) {
+    if (args.empty()) {
         c->Message(Chat::White, usage.c_str());
         return;
     }
 
-    // Variables to store parsed commands and targets
+    // Track commands and targets
+    bool all_classes = false;
     std::vector<int> command_codes;
     std::vector<uint8> class_targets;
-    bool all_classes = false;
 
-    // Process all arguments to identify commands and targets
-    for (int i = 1; i <= sep->argnum; i++) {
-        // Skip any null arguments
-        if (!sep->arg[i]) {
+    // Define mappings for class targets
+    std::map<std::string, uint8> class_map = {
+        {"mag", Class::Magician}, {"mage", Class::Magician}, {"magician", Class::Magician},
+        {"bst", Class::Beastlord}, {"bl", Class::Beastlord}, {"beast", Class::Beastlord}, {"beastlord", Class::Beastlord},
+        {"nec", Class::Necromancer}, {"necro", Class::Necromancer}, {"necromancer", Class::Necromancer},
+        {"enc", Class::Enchanter}, {"ench", Class::Enchanter}, {"enchanter", Class::Enchanter},
+        {"shm", Class::Shaman}, {"shaman", Class::Shaman},
+        {"dru", Class::Druid}, {"druid", Class::Druid},
+        {"brd", Class::Bard}, {"bard", Class::Bard},
+        {"shd", Class::ShadowKnight}, {"sk", Class::ShadowKnight}, {"shadowknight", Class::ShadowKnight},
+        {"war", Class::Warrior}, {"warrior", Class::Warrior},
+        {"clr", Class::Cleric}, {"cler", Class::Cleric}, {"cleric", Class::Cleric},
+        {"pal", Class::Paladin}, {"paladin", Class::Paladin},
+        {"rng", Class::Ranger}, {"ranger", Class::Ranger},
+        {"mnk", Class::Monk}, {"monk", Class::Monk},
+        {"rog", Class::Rogue}, {"rogue", Class::Rogue},
+        {"wiz", Class::Wizard}, {"wizard", Class::Wizard},
+        {"ber", Class::Berserker}, {"berserker", Class::Berserker}
+    };
+
+    // Define mappings for normal commands
+    std::map<std::string, int> command_map = {
+        {"attack", PET_ATTACK},
+        {"qattack", PET_QATTACK},
+        {"follow", PET_FOLLOWME}, {"followme", PET_FOLLOWME},
+        {"guard", PET_GUARDHERE},
+        {"sit", PET_SIT},
+        {"stop", PET_STOP}, {"freeze", PET_STOP},
+        {"back", PET_BACKOFF}, {"backoff", PET_BACKOFF},
+        {"leave", PET_GETLOST}, {"dismiss", PET_GETLOST}, {"getlost", PET_GETLOST},
+        {"health", PET_HEALTHREPORT}, {"healthreport", PET_HEALTHREPORT}, {"hp", PET_HEALTHREPORT},
+        {"leader", PET_LEADER}, {"master", PET_LEADER},
+        {"feign", PET_FEIGN}, {"fd", PET_FEIGN}, {"playdead", PET_FEIGN}
+    };
+
+    // Define mappings for toggle commands with their on/off variants
+    struct ToggleCommand {
+        int base;
+        int on;
+        int off;
+    };
+
+    std::map<std::string, ToggleCommand> toggle_command_map = {
+        {"taunt", {PET_TAUNT, PET_TAUNT_ON, PET_TAUNT_OFF}},
+        {"hold", {PET_HOLD, PET_HOLD_ON, PET_HOLD_OFF}},
+        {"ghold", {PET_GHOLD, PET_GHOLD_ON, PET_GHOLD_OFF}},
+        {"spellhold", {PET_SPELLHOLD, PET_SPELLHOLD_ON, PET_SPELLHOLD_OFF}},
+        {"nocast", {PET_SPELLHOLD, PET_SPELLHOLD_ON, PET_SPELLHOLD_OFF}},
+        {"focus", {PET_FOCUS, PET_FOCUS_ON, PET_FOCUS_OFF}},
+        {"regroup", {PET_REGROUP, PET_REGROUP_ON, PET_REGROUP_OFF}}
+    };
+
+    // Process each argument
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string& arg = Strings::ToLower(args[i]);
+
+        // Check if it's "all"
+        if (arg == "all") {
+            all_classes = true;
             continue;
         }
 
-        std::string arg = sep->arg[i];
-
-        // Check if this is a command
-        int command_code = -1;
-        bool toggle_command = false;
-
-        if (arg == "attack") {
-            command_code = PET_ATTACK;
-        } else if (arg == "qattack") {
-            command_code = PET_QATTACK;
-        } else if (arg == "follow" || arg == "followme") {
-            command_code = PET_FOLLOWME;
-        } else if (arg == "guard") {
-            command_code = PET_GUARDHERE;
-        } else if (arg == "sit") {
-            command_code = PET_SIT;
-        } else if (arg == "stop" || arg == "freeze") {
-            command_code = PET_STOP;
-        } else if (arg == "taunt") {
-            command_code = PET_TAUNT;
-            toggle_command = true;
-        } else if (arg == "hold") {
-            command_code = PET_HOLD;
-            toggle_command = true;
-        } else if (arg == "ghold") {
-            command_code = PET_GHOLD;
-            toggle_command = true;
-        } else if (arg == "spellhold" || arg == "nocast") {
-            command_code = PET_SPELLHOLD;
-            toggle_command = true;
-        } else if (arg == "focus") {
-            command_code = PET_FOCUS;
-            toggle_command = true;
-        } else if (arg == "back" || arg == "backoff") {
-            command_code = PET_BACKOFF;
-        } else if (arg == "regroup") {
-            command_code = PET_REGROUP;
-            toggle_command = true;
-        } else if (arg == "leave" || arg == "dismiss" || arg == "getlost") {
-            command_code = PET_GETLOST;
-        } else if (arg == "health" || arg == "healthreport" || arg == "hp") {
-            command_code = PET_HEALTHREPORT;
-        } else if (arg == "leader" || arg == "master") {
-            command_code = PET_LEADER;
-        } else if (arg == "feign" || arg == "fd" || arg == "playdead") {
-            command_code = PET_FEIGN;
+        // Check if it's a class target
+        auto class_it = class_map.find(arg);
+        if (class_it != class_map.end()) {
+            class_targets.push_back(class_it->second);
+            continue;
         }
 
-        if (command_code != -1) {
-            // If it's a command, check for optional on/off toggle
-            if (toggle_command && i + 1 <= sep->argnum && sep->arg[i + 1]) {
-                std::string next_arg = sep->arg[i + 1];
+        // Check if it's a normal command
+        auto cmd_it = command_map.find(arg);
+        if (cmd_it != command_map.end()) {
+            command_codes.push_back(cmd_it->second);
+            continue;
+        }
 
-                // Check if next arg is "on" or "off" or another valid command/class
+        // Check if it's a toggle command
+        auto toggle_it = toggle_command_map.find(arg);
+        if (toggle_it != toggle_command_map.end()) {
+            // Check for on/off modifier
+            int cmd_code = toggle_it->second.base; // Default to base command
+
+            // Look ahead for on/off
+            if (i + 1 < args.size()) {
+                const std::string& next_arg = Strings::ToLower(args[i + 1]);
                 if (next_arg == "on") {
-                    // Map to ON command code
-                    if (command_code == PET_SIT) command_code = PET_SITDOWN;
-                    else if (command_code == PET_STOP) command_code = PET_STOP_ON;
-                    else if (command_code == PET_TAUNT) command_code = PET_TAUNT_ON;
-                    else if (command_code == PET_HOLD) command_code = PET_HOLD_ON;
-                    else if (command_code == PET_GHOLD) command_code = PET_GHOLD_ON;
-                    else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_ON;
-                    else if (command_code == PET_FOCUS) command_code = PET_FOCUS_ON;
-                    else if (command_code == PET_REGROUP) command_code = PET_REGROUP_ON;
-                    i++; // Skip the "on" token in next iteration
-                } else if (next_arg == "off") {
-                    // Map to OFF command code
-                    if (command_code == PET_SIT) command_code = PET_STANDUP;
-                    else if (command_code == PET_STOP) command_code = PET_STOP_OFF;
-                    else if (command_code == PET_TAUNT) command_code = PET_TAUNT_OFF;
-                    else if (command_code == PET_HOLD) command_code = PET_HOLD_OFF;
-                    else if (command_code == PET_GHOLD) command_code = PET_GHOLD_OFF;
-                    else if (command_code == PET_SPELLHOLD) command_code = PET_SPELLHOLD_OFF;
-                    else if (command_code == PET_FOCUS) command_code = PET_FOCUS_OFF;
-                    else if (command_code == PET_REGROUP) command_code = PET_REGROUP_OFF;
-                    i++; // Skip the "off" token in next iteration
+                    cmd_code = toggle_it->second.on;
+                    i++; // Skip the modifier
                 }
-                // Any other value is treated as a separate command/class - don't increment i
+                else if (next_arg == "off") {
+                    cmd_code = toggle_it->second.off;
+                    i++; // Skip the modifier
+                }
             }
 
-            command_codes.push_back(command_code);
-            continue; // Processed a command, move to next arg
+            command_codes.push_back(cmd_code);
+            continue;
         }
 
-        // If not a command, check if it's a class target
-        if (arg == "all") {
-            all_classes = true;
-        } else if (arg == "mag" || arg == "mage" || arg == "magician") {
-            class_targets.push_back(Class::Magician);
-        } else if (arg == "bst" || arg == "bl" || arg == "beast" || arg == "beastlord") {
-            class_targets.push_back(Class::Beastlord);
-        } else if (arg == "nec" || arg == "necro" || arg == "necromancer") {
-            class_targets.push_back(Class::Necromancer);
-        } else if (arg == "enc" || arg == "ench" || arg == "enchanter") {
-            class_targets.push_back(Class::Enchanter);
-        } else if (arg == "shm" || arg == "shaman") {
-            class_targets.push_back(Class::Shaman);
-        } else if (arg == "dru" || arg == "druid") {
-            class_targets.push_back(Class::Druid);
-        } else if (arg == "brd" || arg == "bard") {
-            class_targets.push_back(Class::Bard);
-        } else if (arg == "shd" || arg == "sk" || arg == "shadowknight") {
-            class_targets.push_back(Class::ShadowKnight);
-        } else if (arg == "war" || arg == "warrior") {
-            class_targets.push_back(Class::Warrior);
-        } else if (arg == "clr" || arg == "cler" || arg == "cleric") {
-            class_targets.push_back(Class::Cleric);
-        } else if (arg == "pal" || arg == "paladin") {
-            class_targets.push_back(Class::Paladin);
-        } else if (arg == "rng" || arg == "ranger") {
-            class_targets.push_back(Class::Ranger);
-        } else if (arg == "mnk" || arg == "monk") {
-            class_targets.push_back(Class::Monk);
-        } else if (arg == "rog" || arg == "rogue") {
-            class_targets.push_back(Class::Rogue);
-        } else if (arg == "wiz" || arg == "wizard") {
-            class_targets.push_back(Class::Wizard);
-        } else if (arg == "ber" || arg == "berserker") {
-            class_targets.push_back(Class::Berserker);
-        }
-        // If it's neither a command nor a class, silently ignore it
+        // Unrecognized argument - silently ignore
     }
 
     // If no commands specified, show usage
