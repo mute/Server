@@ -388,7 +388,6 @@ bool Client::Process() {
 		}
 
 		if ((AutoFireEnabled() || (AutoAttackEnabled() && GetAttackMode() == AttackMode::RANGED)) && may_use_attacks) {
-			SetWeaponAppearance();
 			if (GetTarget() == this) {
 				MessageString(Chat::TooFarAway, TRY_ATTACKING_SOMEONE);
 				auto_fire = false;

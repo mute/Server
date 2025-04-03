@@ -3607,8 +3607,6 @@ void Client::Handle_OP_AutoAttack(const EQApplicationPacket *app)
 		return;
 	}
 
-	SetWeaponAppearance();
-
 	if (app->pBuffer[0] == 0) {
 		auto_attack = false;
 		if (IsAIControlled()) {
