@@ -15642,7 +15642,6 @@ void Client::Handle_OP_UpdateAura(const EQApplicationPacket *app)
 
 void Client::Handle_OP_WearChange(const EQApplicationPacket *app)
 {
-	LogDebug("Got OP_WearChange from client");
 	if (app->size != sizeof(WearChange_Struct)) {
 		std::cout << "Wrong size: OP_WearChange, size=" << app->size << ", expected " << sizeof(WearChange_Struct) << std::endl;
 		return;
@@ -15652,6 +15651,8 @@ void Client::Handle_OP_WearChange(const EQApplicationPacket *app)
 	if (wc->spawn_id != GetID())
 		return;
 
+	LogDebug("Got OP_WearChange from client, slot [{}]", wc->wear_slot_id);
+
 	// Hero Forge ID needs to be fixed here as RoF2 appears to send an incorrect value.
 	if (wc->wear_slot_id >= 0 && wc->wear_slot_id < EQ::textures::weaponPrimary)
 		wc->hero_forge_model = GetHerosForgeModel(wc->wear_slot_id);
@@ -15660,8 +15661,23 @@ void Client::Handle_OP_WearChange(const EQApplicationPacket *app)
 	// We probably need to skip this entirely when it is send as an ack, but not sure how to ID that.
 	entity_list.QueueClients(this, app, true);
 
-	if (wc->wear_slot_id == EQ::textures::armorChest || GetHerosForgeModel(EQ::textures::armorChest) % 10 == 7) {
-		SendArmorAppearance();
+
+	std::vector<EQ::textures::TextureSlot> hf_robe_slots = {
+		EQ::textures::TextureSlot::armorChest,
+		EQ::textures::TextureSlot::armorArms,
+		EQ::textures::TextureSlot::armorWrist,
+		EQ::textures::TextureSlot::armorLegs
+	};
+
+	if (wc->wear_slot_id == EQ::textures::armorChest ||
+		(GetHerosForgeModel(EQ::textures::armorChest) % 10 == 7 &&
+		std::find(hf_robe_slots.begin(), hf_robe_slots.end(), wc->wear_slot_id) != hf_robe_slots.end())) {
+
+		for (const auto& slot_id : hf_robe_slots) {
+			if (GetTextureProfileMaterial(slot_id) || IsClient()) {
+				SendWearChange(slot_id);
+			}
+		}
 	}
 }
 

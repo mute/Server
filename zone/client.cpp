@@ -13904,8 +13904,12 @@ void Client::DoPetBagResync(int class_id) {
 				}
 			}
 
-			pet->SendWearChange(EQ::textures::weaponPrimary);
-			pet->SendWearChange(EQ::textures::weaponSecondary);
+			if (!pet->GetEquipmentMaterial(EQ::textures::weaponPrimary)) {
+				pet->SendWearChange(EQ::textures::weaponPrimary);
+			}
+			if (!pet->GetEquipmentMaterial(EQ::textures::weaponSecondary)) {
+				pet->SendWearChange(EQ::textures::weaponSecondary);
+			}
 
 			pet_npc->SetAttackTimer();
 		}

@@ -2567,7 +2567,10 @@ bool Client::SwapItem(MoveItem_Struct* move_in) {
 
 	if (RuleB(Custom, EnablePetBags)) {
 		for (int class_id = Class::Warrior; class_id <= Class::Berserker; class_id++) {
-			DoPetBagResync(class_id);
+			auto pet_bag_idx = GetActivePetBagSlot(class_id);
+			if (pet_bag_idx == EQ::InventoryProfile::CalcSlotId(dst_slot_id) || pet_bag_idx == EQ::InventoryProfile::CalcSlotId(src_slot_id)) {
+				DoPetBagResync(class_id);
+			}
 		}
 	}
 

@@ -466,7 +466,6 @@ void NPC::AddLootDropFixed(
 				}
 
 				const uint32 slots = (1 << i);
-				LogDebug("Test: [{}], [{}], [{}]", inst->GetItemSlots(true), slots, inst->GetItemSlots(true) & slots);
 				if (inst->GetItemSlots(true) & slots) {
 					if (equipment[i]) {
 						compitem = database.GetItem(equipment[i]);
@@ -639,6 +638,8 @@ void NPC::AddLootDropFixed(
 			safe_delete(inst);
 			return;
 	}
+
+	wear_change = wear_change && (IsPlayerRace(GetRace()) || (found_slot == EQ::invslot::slotPrimary || found_slot == EQ::invslot::slotSecondary));
 
 	if (wear_change && outapp) {
 		entity_list.QueueClients(this, outapp);
