@@ -2191,6 +2191,11 @@ bool Mob::Rampage(ExtraAttackOptions *opts)
 					if (m_target == GetTarget()) {
 						continue;
 					}
+
+					if (RuleB(Custom, ConditionalPetRampageImmunity) && m_target->GetOwner() && m_target->GetOwner()->IsClient() && m_target->GetSpecialAbility(SpecialAbility::BeingAggroImmunity)) {
+						continue;
+					}
+
 					ProcessAttackRounds(m_target, opts, true);
 					index_hit++;
 				}
