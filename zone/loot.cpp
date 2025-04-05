@@ -932,7 +932,7 @@ void NPC::ClearLootItems()
 	end = m_loot_items.end();
 	for (; cur != end; ++cur) {
 		LootItem *item = *cur;
-		RemoveItem(item->item_id);
+		safe_delete(item);
 	}
 	m_loot_items.clear();
 
