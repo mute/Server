@@ -422,7 +422,7 @@ void NPC::AddLootDropFixed(
 		// If an item can fit into multiple slots we'll pick the last one where
 		// it is an improvement.
 
-		if (!item2->ItemType == EQ::item::ItemTypeAugmentation && !item2->NoPet) {
+		if (!item2->ItemType == EQ::item::ItemTypeAugmentation || !item2->NoPet) {
 			std::vector<int> custom_order = {
 				EQ::invslot::slotPrimary,
 				EQ::invslot::slotSecondary,
