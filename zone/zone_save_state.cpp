@@ -455,8 +455,9 @@ bool Zone::LoadZoneState(
 		}
 	}
 
+	std::vector<Spawn2Repository::Spawn2> spawn2s;
 	if (!spawn2_ids.empty()) {
-		std::vector<Spawn2Repository::Spawn2> spawn2s = Spawn2Repository::GetWhere(
+		spawn2s = Spawn2Repository::GetWhere(
 			content_db,
 			fmt::format(
 				"id IN ({})",
