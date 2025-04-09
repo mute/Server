@@ -1,4 +1,5 @@
 #include "data_bucket.h"
+#include "client.h"
 #include "zonedb.h"
 #include "mob.h"
 #include "worldserver.h"
@@ -359,7 +360,8 @@ bool DataBucket::GetDataBuckets(Mob *mob)
 		BulkLoadEntitiesToCache(DataBucketLoadType::Bot, {id});
 	}
 	else if (mob->IsClient()) {
-		BulkLoadEntitiesToCache(DataBucketLoadType::Account, {id});
+		uint32 account_id = mob->CastToClient()->AccountID();
+		BulkLoadEntitiesToCache(DataBucketLoadType::Account, {account_id});
 		BulkLoadEntitiesToCache(DataBucketLoadType::Client, {id});
 	}
 
