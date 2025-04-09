@@ -3246,7 +3246,10 @@ void Mob::AddToHateList(Mob* other, int64 hate /*= 0*/, int64 damage /*= 0*/, bo
 	Mob* targetmob = GetTarget();
 	bool on_hatelist = CheckAggro(other);
 
-	AddRampage(other);
+	// Dont add to pet's rampage list unless its currently attacking something or was issued to via a pet command
+	if(!IsPet() || wasengaged || pet_command) {
+		AddRampage(other);
+	}
 	if (on_hatelist) { // odd reason, if you're not on the hate list, subtlety etc don't apply!
 		// Spell Casting Subtlety etc
 		int64 hatemod = 100 + other->spellbonuses.hatemod + other->itembonuses.hatemod + other->aabonuses.hatemod;
