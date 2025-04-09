@@ -26,7 +26,7 @@
 #include "lua_parser.h"
 #include "npc.h"
 #include "bot.h"
-#include "bot.h"
+#include "aa.h"
 
 #include <string.h>
 
@@ -2315,9 +2315,10 @@ void NPC::DoClassAttacks(Mob *target) {
 void Client::DoClassAttacks(Mob *ca_target, uint16 skill, bool IsRiposte)
 {
 	if (skill == EQ::skills::SkillBash) {
-		auto offhand = m_inv.GetItem(EQ::invslot::slotSecondary);
-		if (!offhand || offhand->GetItemType() != EQ::item::ItemTypeShield) {
-			return;
+		if (!(GetRace() == OGRE || GetRace() == TROLL || GetRace() == BARBARIAN)) {
+			if (!(HasShieldEquipped() || (GetAA(aa2HandBash) >= 1 && HasTwoHanderEquipped()))) {
+				return;
+			}
 		}
 	}
 
