@@ -1463,6 +1463,18 @@ enum StatEntry
 	statArcheryCritRate,
 	statRuneAmount,
 	statSpellRuneAmount,
+	statCapSTR,
+	statCapSTA,
+	statCapDEX,
+	statCapAGI,
+	statCapINT,
+	statCapWIS,
+	statCapCHA,
+	statCapMR,
+	statCapFR,
+	statCapCR,
+	statCapDR,
+	statCapPR,
 	statDummyValue,
 	statMax
 };

@@ -3419,6 +3419,30 @@ int64_t Client::GetStatEntryValue(StatEntry label)
 			return GetMitigationAC();
 		case statEvasion:
 			return GetTotalDefense();
+		case statCapSTR:
+			return GetMaxSTR();
+		case statCapSTA:
+			return GetMaxSTA();
+		case statCapDEX:
+			return GetMaxDEX();
+		case statCapAGI:
+			return GetMaxAGI();
+		case statCapINT:
+			return GetMaxINT();
+		case statCapWIS:
+			return GetMaxWIS();
+		case statCapCHA:
+			return GetMaxCHA();
+		case statCapMR:
+			return GetMaxMR();
+		case statCapFR:
+			return GetMaxFR();
+		case statCapCR:
+			return GetMaxCR();
+		case statCapDR:
+			return GetMaxDR();
+		case statCapPR:
+			return GetMaxPR();
 		case statSTR:
 			return GetSTR();
 		case statSTA:
