@@ -2446,6 +2446,9 @@ void NPC::DoPetCommand(int pet_command_id, Mob* target) {
 			DoPetCommandRegroup(false);
 			break;
 	}
+	if (GetOwner()) {
+		GetOwner()->CastToClient()->SendBulkStatsUpdate();
+	}
 }
 
 Client* NPC::DoPetCommandChecks(int pet_command_id) {

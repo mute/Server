@@ -5569,6 +5569,66 @@ void Mob::TryPetCriticalHit(Mob *defender, DamageHitInfo &hit)
 	}
 }
 
+int Mob::GetBaseCriticalHitChance(EQ::skills::SkillType skill) {
+    bool innate_crit = false;
+    int crit_chance = GetCriticalChanceBonus(skill);
+
+    if ((HasClass(Class::Warrior) || HasClass(Class::Berserker)) && GetLevel() >= 12) {
+        innate_crit = true;
+    } else if (HasClass(Class::Ranger) && GetLevel() >= 12 && skill == EQ::skills::SkillArchery) {
+        innate_crit = true;
+    } else if (HasClass(Class::Rogue) && GetLevel() >= 12 && skill == EQ::skills::SkillThrowing) {
+        innate_crit = true;
+    }
+
+    if (innate_crit || crit_chance) {
+        int difficulty = 0;
+
+        if (skill == EQ::skills::SkillArchery) {
+            difficulty = RuleI(Combat, ArcheryCritDifficulty);
+        } else if (skill == EQ::skills::SkillThrowing) {
+            difficulty = RuleI(Combat, ThrowingCritDifficulty);
+        } else {
+            difficulty = RuleI(Combat, MeleeCritDifficulty);
+        }
+
+        int dex_bonus = GetDEX();
+        if (dex_bonus > 255) {
+            dex_bonus = 255 + ((dex_bonus - 255) / 5);
+        }
+        dex_bonus += 45; // chances did not match live without a small boost
+
+        // so if we have an innate crit we have a better chance
+        if (!innate_crit) {
+            dex_bonus = dex_bonus * 3 / 5;
+        }
+
+        if (crit_chance) {
+            dex_bonus += dex_bonus * crit_chance / 100;
+        }
+
+        // Calculate the probability as a percentage using integer math
+        int success_chance = 0;
+        if (dex_bonus > 0) {
+            if (dex_bonus > difficulty) {
+                success_chance = 100;
+            } else {
+                int64 calc = static_cast<int64>(dex_bonus - 1) * 100;
+                success_chance = static_cast<int>(calc / difficulty);
+
+                int64 remainder = calc % difficulty;
+                if (remainder >= difficulty / 2) {
+                    success_chance++;
+                }
+            }
+        }
+
+        return success_chance;
+    }
+
+    return 0;
+}
+
 void Mob::TryCriticalHit(Mob *defender, DamageHitInfo &hit, ExtraAttackOptions *opts)
 {
 #ifdef LUA_EQEMU
@@ -5650,53 +5710,24 @@ void Mob::TryCriticalHit(Mob *defender, DamageHitInfo &hit, ExtraAttackOptions *
 	// 2: Try Melee Critical
 	// a lot of good info: http://giline.versus.jp/shiden/damage_e.htm, http://giline.versus.jp/shiden/su.htm
 
-	// We either require an innate crit chance or some SPA 169 to crit
-	bool innate_crit = false;
-	int crit_chance = GetCriticalChanceBonus(hit.skill);
-	if ((HasClass(Class::Warrior) || HasClass(Class::Berserker)) && GetLevel() >= 12) {
-		innate_crit = true;
-	} else if (HasClass(Class::Ranger) && GetLevel() >= 12 && hit.skill == EQ::skills::SkillArchery) {
-		innate_crit = true;
-	} else if (HasClass(Class::Rogue) && GetLevel() >= 12 && hit.skill == EQ::skills::SkillThrowing) {
-		innate_crit = true;
-	}
+	// Get our base critical hit chance
+	int crit_chance_percent = GetBaseCriticalHitChance(hit.skill);
 
-	// we have a chance to crit!
-	if (innate_crit || crit_chance) {
-		int difficulty = 0;
+	// If we have a chance to crit
+	if (crit_chance_percent > 0) {
 
-		if (hit.skill == EQ::skills::SkillArchery) {
-			difficulty = RuleI(Combat, ArcheryCritDifficulty);
-		} else if (hit.skill == EQ::skills::SkillThrowing) {
-			difficulty = RuleI(Combat, ThrowingCritDifficulty);
-		} else {
-			difficulty = RuleI(Combat, MeleeCritDifficulty);
-		}
+    // Fake 'Devastating Frenzy' being a real AA
+    if (GetLevel() >= 51 && hit.skill == EQ::skills::SkillFrenzy) {
+        // Scale the crit chance by defender's HP ratio
+        crit_chance_percent = crit_chance_percent * defender->GetHPRatio() / 100;
+    }
 
-		int roll = zone->random.Int(1, difficulty);
-		int dex_bonus = GetDEX();
+    // Determine if we crit based on the calculated chance
+    int roll = zone->random.Int(1, 100);
 
-		if (dex_bonus > 255) {
-			dex_bonus = 255 + ((dex_bonus - 255) / 5);
-		}
-
-		dex_bonus += 45; // chances did not match live without a small boost
-
-						 // so if we have an innate crit we have a better chance, except for ber throwing
-		if (!innate_crit || (HasClass(Class::Berserker) && hit.skill == EQ::skills::SkillThrowing)) {
-			dex_bonus = dex_bonus * 3 / 5;
-		}
-
-		if (crit_chance) {
-			dex_bonus += dex_bonus * crit_chance / 100;
-		}
-
-		if (GetLevel() >= 51 && hit.skill == EQ::skills::SkillFrenzy) {
-			roll *= (defender->GetHPRatio() / 100);
-		}
-
-		// check if we crited
-		if (roll < dex_bonus) {
+    // check if we crited
+    if (roll <= crit_chance_percent) {
+        // Critical hit success code goes here
 			// step 1: check for finishing blow
 			if (TryFinishingBlow(defender, hit.damage_done)) {
 				return;
@@ -5712,7 +5743,6 @@ void Mob::TryCriticalHit(Mob *defender, DamageHitInfo &hit, ExtraAttackOptions *
 			}
 
 			hit.damage_done = hit.damage_done * crit_mod / 100;
-			LogCombatDetail("Crit success roll [{}] dex chance [{}] og dmg [{}] crit_mod [{}] new dmg [{}]", roll, dex_bonus, og_damage, crit_mod, hit.damage_done);
 
 			if (RuleR(Custom, DevastatingFrenzyDamageMultiplier) > 0 &&
 				HasClass(Class::Berserker) &&

@@ -3478,7 +3478,7 @@ int64_t Client::GetStatEntryValue(StatEntry label)
 		case statHeroicPR:
 			return GetHeroicPR();
 		case statAC:
-			return ACSum();
+			return ACSum() + GetMitigationAC() + GetTotalDefense();
 		case statSpellDmg:
 			return itembonuses.SpellDmg;
 		case statHealAmt:
@@ -3616,6 +3616,220 @@ int64_t Client::GetStatEntryValue(StatEntry label)
 		}
 		case statAttackMode: {
 			return static_cast<int>(GetAttackMode());
+		}
+		case statWornATK: {
+			return itembonuses.ATK;
+		}
+		case statItemEXP: {
+			auto item = m_inv.GetItem(EQ::invslot::slotPowerSource);
+			if (item) {
+				float float_exp = Strings::ToFloat(item->GetCustomData("Exp"), 0);
+				return static_cast<int>(float_exp * 1000);
+			}
+			return 0;
+		}
+		case statSpellCritRate: {
+			return GetSharedCriticalSpellChance();
+		}
+		case statSpellCritRatio: {
+			return (GetSharedSpellCritDmgIncrease() + GetSharedSpellCritDmgIncNoStack());
+		}
+		case statHealCritRate: {
+			return GetSharedCriticalHealChance();
+		}
+		case statHoTCritRate: {
+			return GetSharedCriticalHealOverTime();
+		}
+		case statDoTCritRate: {
+			return GetSharedCriticalDoTChance();
+		}
+		case statDoTCritRatio: {
+			return GetSharedDotCritDmgIncrease();
+		}
+		case statMeleeCritRate: {
+			return GetBaseCriticalHitChance(EQ::skills::HIGHEST_SKILL);
+		}
+		case statArcheryCritRate: {
+			return GetBaseCriticalHitChance(EQ::skills::SkillArchery);
+		}
+		case statMeleeCritRatio: {
+			return 170 + GetCritDmgMod(EQ::skills::HIGHEST_SKILL);
+		}
+		case statPetFlurryRate: {
+			return aabonuses.PetFlurry + itembonuses.PetFlurry + spellbonuses.PetFlurry;
+		}
+		case statPetMeleeCritRate: {
+			return aabonuses.PetCriticalHit + itembonuses.PetCriticalHit + spellbonuses.PetCriticalHit;
+		}
+		case statPetAvoidance: {
+			return aabonuses.PetAvoidance + itembonuses.PetAvoidance + spellbonuses.PetAvoidance;
+		}
+		case statPetMeleeMitigation: {
+			return aabonuses.PetMeleeMitigation + itembonuses.PetMeleeMitigation + spellbonuses.PetMeleeMitigation;
+		}
+		case statPrimaryActualDelay: {
+			return attack_timer.GetDuration() / 1000;
+		}
+		case statSecondaryActualDelay: {
+			return attack_dw_timer.GetDuration() / 1000;
+		}
+		case statPet0Taunt: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->IsTaunting();
+			}
+			return -1;
+		}
+		case statPet0Hold: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet0GHold: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->IsGHeld();
+			}
+			return -1;
+		}
+		case statPet0Focus: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->IsFocused();
+			}
+			return -1;
+		}
+		case statPet0Spellhold: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet0SPO: {
+			if (GetPet(0)) {
+				return GetPet(0)->CastToNPC()->GetPetOrder();
+			}
+			return -1;
+		}
+		case statPet1Taunt: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->IsTaunting();
+			}
+			return -1;
+		}
+		case statPet1Hold: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet1GHold: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->IsGHeld();
+			}
+			return -1;
+		}
+		case statPet1Focus: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->IsFocused();
+			}
+			return -1;
+		}
+		case statPet1Spellhold: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet1SPO: {
+			if (GetPet(1)) {
+				return GetPet(1)->CastToNPC()->GetPetOrder();
+			}
+			return -1;
+		}
+		case statPet2Taunt: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->IsTaunting();
+			}
+			return -1;
+		}
+		case statPet2Hold: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet2GHold: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->IsGHeld();
+			}
+			return -1;
+		}
+		case statPet2Focus: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->IsFocused();
+			}
+			return -1;
+		}
+		case statPet2Spellhold: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->IsHeld();
+			}
+			return -1;
+		}
+		case statPet2SPO: {
+			if (GetPet(2)) {
+				return GetPet(2)->CastToNPC()->GetPetOrder();
+			}
+			return -1;
+		}
+		case statCapSpellShield:
+			return RuleI(Character, ItemSpellShieldingCap);
+		case statCapShielding:
+			return RuleI(Character, ItemShieldingCap);
+		case statCapDamageShield:
+			return RuleI(Character, ItemDamageShieldCap);
+		case statCapDoTShield:
+			return RuleI(Character, ItemDoTShieldingCap);
+		case statCapDSMitigation:
+			return RuleI(Character, ItemDoTShieldingCap);
+		case statCapAvoidance:
+			return RuleI(Character, ItemAvoidanceCap);
+		case statCapAccuracy:
+			return RuleI(Character, ItemAccuracyCap);
+		case statCapStunResist:
+			return RuleI(Character, ItemStunResistCap);
+		case statCapStrikethrough:
+			return RuleI(Character, ItemStrikethroughCap);
+		case statCapCombatEffects:
+			return RuleI(Character, ItemCombatEffectsCap);
+		case statCapHealAmount:
+			return RuleI(Character, ItemHealAmtCap);
+		case statCapSpellDamage:
+			return RuleI(Character, ItemSpellDmgCap);
+		case statCapWornATK:
+			return CalcItemATKCap();
+		case statCapClairvoyance:
+			return RuleI(Character, ItemClairvoyanceCap);
+		case statRuneAmount: {
+			int rune_number = 0;
+			for (auto i = 0; i < GetMaxTotalSlots(); i++) {
+				if (IsValidSpell(buffs[i].spellid)) {
+					if (buffs[i].melee_rune > 0) {
+						rune_number += buffs[i].melee_rune;
+					}
+				}
+			}
+			return rune_number;
+		}
+		case statSpellRuneAmount: {
+			int rune_number = 0;
+			for (auto i = 0; i < GetMaxTotalSlots(); i++) {
+				if (IsValidSpell(buffs[i].spellid)) {
+					if (buffs[i].melee_rune > 0) {
+						rune_number += buffs[i].magic_rune;
+					}
+				}
+			}
+			return rune_number;
 		}
 		default:
 			return 0;

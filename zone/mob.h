@@ -238,6 +238,7 @@ public:
 	int GetTotalToHit(EQ::skills::SkillType skill, int chance_mod); // compute_tohit + spell bonuses
 	int compute_defense();
 	int GetTotalDefense(); // compute_defense + spell bonuses
+	int GetBaseCriticalHitChance(EQ::skills::SkillType skill);
 	bool CheckHitChance(Mob* attacker, DamageHitInfo &hit);
 	void TryCriticalHit(Mob *defender, DamageHitInfo &hit, ExtraAttackOptions *opts = nullptr);
 	void TryPetCriticalHit(Mob *defender, DamageHitInfo &hit);
