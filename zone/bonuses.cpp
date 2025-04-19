@@ -318,13 +318,13 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 	b->HeroicWIS += CalcItemBonus(item->HeroicWis);
 	b->HeroicCHA += CalcItemBonus(item->HeroicCha);
 
-	b->STRCapMod += b->HeroicSTR;
-	b->STACapMod += b->HeroicSTA;
-	b->DEXCapMod += b->HeroicDEX;
-	b->AGICapMod += b->HeroicAGI;
-	b->INTCapMod += b->HeroicINT;
-	b->WISCapMod += b->HeroicWIS;
-	b->CHACapMod += b->HeroicCHA;
+	b->STRCapMod += item->HeroicStr;
+	b->STACapMod += item->HeroicSta;
+	b->DEXCapMod += item->HeroicDex;
+	b->AGICapMod += item->HeroicAgi;
+	b->INTCapMod += item->HeroicInt;
+	b->WISCapMod += item->HeroicWis;
+	b->CHACapMod += item->HeroicCha;
 
 	b->MR += CalcItemBonus(item->MR + item->HeroicMR);
 	b->FR += CalcItemBonus(item->FR + item->HeroicFR);
@@ -340,12 +340,12 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 	b->HeroicDR += CalcItemBonus(item->HeroicDR);
 	b->HeroicCorrup += CalcItemBonus(item->HeroicSVCorrup);
 
-	b->MRCapMod += b->HeroicMR;
-	b->FRCapMod += b->HeroicFR;
-	b->CRCapMod += b->HeroicCR;
-	b->PRCapMod += b->HeroicPR;
-	b->DRCapMod += b->HeroicDR;
-	b->CorrupCapMod += b->HeroicCorrup;
+	b->MRCapMod += item->HeroicMR;
+	b->FRCapMod += item->HeroicFR;
+	b->CRCapMod += item->HeroicCR;
+	b->PRCapMod += item->HeroicPR;
+	b->DRCapMod += item->HeroicDR;
+	b->CorrupCapMod += item->HeroicSVCorrup;
 
 	b->HPRegen += CalcItemBonus(item->Regen);
 	b->ManaRegen += CalcItemBonus(item->ManaRegen);
@@ -1165,10 +1165,6 @@ void Mob::ApplyAABonuses(const AA::Rank &rank, StatBonuses *newbon)
 		}
 
 		case SE_ResistFearChance: {
-			if (base_value == 100) // If we reach 100% in a single spell/item then we should be immune to
-					  // negative fear resist effects until our immunity is over
-				newbon->Fearless = true;
-
 			newbon->ResistFearChance += base_value; // these should stack
 			break;
 		}
@@ -2474,9 +2470,6 @@ void Mob::ApplySpellsBonuses(uint16 spell_id, uint8 casterlevel, StatBonuses *ne
 
 			case SE_ResistFearChance:
 			{
-				if(effect_value == 100) // If we reach 100% in a single spell/item then we should be immune to negative fear resist effects until our immunity is over
-					new_bonus->Fearless = true;
-
 				new_bonus->ResistFearChance += effect_value; // these should stack
 				break;
 			}
@@ -4689,11 +4682,7 @@ void Mob::NegateSpellEffectBonuses(uint16 spell_id)
 					break;
 
 				case SE_ResistFearChance:
-					if (negate_spellbonus) {
-						spellbonuses.Fearless = false;
-						spellbonuses.ResistFearChance = effect_value;
-					}
-
+					if (negate_spellbonus) {spellbonuses.ResistFearChance = effect_value;	}
 					if (negate_aabonus) { aabonuses.ResistFearChance = effect_value; }
 					if (negate_itembonus) { itembonuses.ResistFearChance = effect_value; }
 					break;
@@ -5330,6 +5319,14 @@ void Mob::NegateSpellEffectBonuses(uint16 spell_id)
 						if (negate_spellbonus) {
 							spellbonuses.SEResist[e]     = effect_value;
 							spellbonuses.SEResist[e + 1] = effect_value;
+						}
+						if (negate_itembonus) {
+							itembonuses.SEResist[e] = effect_value;
+							itembonuses.SEResist[e + 1] = effect_value;
+						}
+						if (negate_aabonus) {
+							aabonuses.SEResist[e] = effect_value;
+							aabonuses.SEResist[e + 1] = effect_value;
 						}
 					}
 					break;

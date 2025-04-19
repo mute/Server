@@ -332,6 +332,10 @@ public:
 	bool KeyRingClear();
 	bool KeyRingRemove(uint32 item_id);
 	void KeyRingList();
+	bool IsNameChangeAllowed();
+	void InvokeChangeNameWindow(bool immediate = true);
+	bool ClearNameChange();
+	void GrantNameChange();
 	bool IsPetNameChangeAllowed();
 	void GrantPetNameChange();
 	void ClearPetNameChange();
@@ -404,6 +408,7 @@ public:
 	void LoadParcels();
 	std::map<uint32, CharacterParcelsRepository::CharacterParcels> GetParcels() { return m_parcels; }
 	int32 FindNextFreeParcelSlot(uint32 char_id);
+	int32 FindNextFreeParcelSlotUsingMemory();
 	void SendParcelIconStatus();
 
 	void SendBecomeTraderToWorld(Client *trader, BazaarTraderBarterActions action);
@@ -442,6 +447,8 @@ public:
 	int64 ValidateBuyLineCost(std::map<uint32, BuylineItemDetails_Struct>& item_map);
 	bool DoBarterBuyerChecks(BuyerLineSellItem_Struct& sell_line);
 	bool DoBarterSellerChecks(BuyerLineSellItem_Struct& sell_line);
+	void CancelBuyerTradeWindow();
+	void CancelTraderTradeWindow();
 
 	void FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho);
 	bool ShouldISpawnFor(Client *c) { return !GMHideMe(c) && !IsHoveringForRespawn(); }
@@ -476,6 +483,9 @@ public:
 
 	virtual bool Save() { return Save(0); }
 	bool Save(uint8 iCommitNow); // 0 = delayed, 1=async now, 2=sync now
+	inline void SaveCharacterData() {
+		database.SaveCharacterData(this, &m_pp, &m_epp);
+	};
 
 	/* New PP Save Functions */
 	bool SaveCurrency(){ return database.SaveCharacterCurrency(this->CharacterID(), &m_pp); }
@@ -508,7 +518,8 @@ public:
 	bool AutoAttackEnabled() const { return auto_attack; }
 	bool AutoFireEnabled() const { return auto_fire; }
 
-	bool ChangeFirstName(const char* in_firstname,const char* gmname);
+	bool ChangeFirstName(const std::string in_firstname,const std::string gmname);
+	bool ChangeFirstName(const std::string in_firstname);
 
 	void Duck();
 	void Stand();
@@ -1900,7 +1911,7 @@ public:
 	void SendEvolvingPacket(int8 action, const CharacterEvolvingItemsRepository::CharacterEvolvingItems &item);
 	void DoEvolveItemToggle(const EQApplicationPacket* app);
 	void DoEvolveItemDisplayFinalResult(const EQApplicationPacket* app);
-	bool DoEvolveCheckProgression(const EQ::ItemInstance &inst);
+	bool DoEvolveCheckProgression(EQ::ItemInstance &inst);
 	void SendEvolveXPWindowDetails(const EQApplicationPacket* app);
 	void DoEvolveTransferXP(const EQApplicationPacket* app);
 	void SendEvolveXPTransferWindow();

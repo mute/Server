@@ -290,7 +290,7 @@ Corpse::Corpse(Client *c, int32 rez_exp, KilledByTypes in_killed_by) : Mob(
 	m_corpse_graveyard_timer.SetTimer(RuleI(Zone, GraveyardTimeMS));
 	m_loot_cooldown_timer.SetTimer(10);
 	m_check_rezzable_timer.SetTimer(1000);
-	m_check_owner_online_timer.SetTimer(RuleI(Character, CorpseOwnerOnlineTime));
+	m_check_owner_online_timer.SetTimer(RuleI(Character, CorpseOwnerOnlineCheckTime) * 1000);
 
 	m_corpse_rezzable_timer.Disable();
 	SetRezTimer(true);
@@ -583,7 +583,7 @@ Corpse::Corpse(
 	m_corpse_delay_timer.SetTimer(RuleI(NPC, CorpseUnlockTimer));
 	m_corpse_graveyard_timer.SetTimer(RuleI(Zone, GraveyardTimeMS));
 	m_loot_cooldown_timer.SetTimer(10);
-	m_check_owner_online_timer.SetTimer(RuleI(Character, CorpseOwnerOnlineTime));
+	m_check_owner_online_timer.SetTimer(RuleI(Character, CorpseOwnerOnlineCheckTime) * 1000);
 	m_check_rezzable_timer.SetTimer(1000);
 	m_corpse_rezzable_timer.Disable();
 
@@ -1569,7 +1569,7 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 			}
 		}
 
-		if (player_event_logs.IsEventEnabled(PlayerEvent::LOOT_ITEM) && !IsPlayerCorpse()) {
+		if (inst && player_event_logs.IsEventEnabled(PlayerEvent::LOOT_ITEM) && !IsPlayerCorpse()) {
 			auto e = PlayerEvent::LootItemEvent{
 				.item_id      = inst->GetItem()->ID,
 				.item_name    = inst->GetItem()->Name,

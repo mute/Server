@@ -887,7 +887,7 @@ void Zone::Shutdown(bool quiet)
 		c.second->WorldKick();
 	}
 
-	if (RuleB(Zone, StateSavingOnShutdown)) {
+	if (m_save_zone_state && RuleB(Zone, StateSavingOnShutdown) && zone && zone->IsLoaded()) {
 		SaveZoneState();
 	}
 
@@ -1010,6 +1010,7 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
 
 	SetIdleWhenEmpty(true);
 	SetSecondsBeforeIdle(60);
+	SetSaveZoneState(false);
 
 	if (database.GetServerType() == 1) {
 		pvpzone = true;
@@ -1190,6 +1191,11 @@ bool Zone::Init(bool is_static) {
 
 	RespawnTimesRepository::ClearExpiredRespawnTimers(database);
 
+	// Loading zone variables so they're available for things like encounter_load
+	if (RuleB(Zone, StateSavingOnShutdown)) {
+		zone->LoadZoneVariablesState();
+	}
+
 	// make sure that anything that needs to be loaded prior to scripts is loaded before here
 	// this is to ensure that the scripts have access to the data they need
 	parse->ReloadQuests(true);
@@ -1204,6 +1210,8 @@ bool Zone::Init(bool is_static) {
 	}
 
 	content_db.PopulateZoneSpawnList(zoneid, spawn2_list, GetInstanceVersion());
+	SetSaveZoneState(true);
+
 	database.LoadCharacterCorpses(zoneid, instanceid);
 
 	content_db.LoadTraps(short_name, GetInstanceVersion());
@@ -1534,7 +1542,6 @@ bool Zone::Process() {
 	spawn_conditions.Process();
 
 	if (spawn2_timer.Check()) {
-
 		LinkedListIterator<Spawn2 *> iterator(spawn2_list);
 
 		EQ::InventoryProfile::CleanDirty();
@@ -3218,5 +3225,78 @@ void Zone::DisableRespawnTimers()
 	}
 }
 
-#include "zone_save_state.cpp"
+void Zone::ClearVariables()
+{
+	m_zone_variables.clear();
+}
+
+bool Zone::DeleteVariable(const std::string& variable_name)
+{
+	if (m_zone_variables.empty() || variable_name.empty()) {
+		return false;
+	}
+
+	auto v = m_zone_variables.find(variable_name);
+	if (v == m_zone_variables.end()) {
+		return false;
+	}
+
+	m_zone_variables.erase(v);
+
+	return true;
+}
+
+std::string Zone::GetVariable(const std::string& variable_name)
+{
+	if (m_zone_variables.empty() || variable_name.empty()) {
+		return std::string();
+	}
+
+	const auto& v = m_zone_variables.find(variable_name);
+
+	return v != m_zone_variables.end() ? v->second : std::string();
+}
+
+std::vector<std::string> Zone::GetVariables()
+{
+	std::vector<std::string> l;
+
+	if (m_zone_variables.empty()) {
+		return l;
+	}
+
+	l.reserve(m_zone_variables.size());
+
+	for (const auto& v : m_zone_variables) {
+		l.emplace_back(v.first);
+	}
+
+	return l;
+}
+
+void Zone::SetVariable(const std::string& variable_name, const std::string& variable_value)
+{
+	if (variable_name.empty()) {
+		return;
+	}
+
+	m_zone_variables[variable_name] = variable_value;
+}
+
+bool Zone::VariableExists(const std::string& variable_name)
+{
+	if (m_zone_variables.empty() || variable_name.empty()) {
+		return false;
+	}
+
+	return m_zone_variables.find(variable_name) != m_zone_variables.end();
+}
+
+void Zone::ReloadMaps()
+{
+	zonemap  = Map::LoadMapFile(map_name);
+	watermap = WaterMap::LoadWaterMapfile(map_name);
+	pathing  = IPathfinder::Load(map_name);
+}
+
 #include "zone_loot.cpp"

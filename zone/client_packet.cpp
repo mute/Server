@@ -73,6 +73,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "../common/repositories/character_stats_record_repository.h"
 #include "dialogue_window.h"
 #include "../common/rulesys.h"
+#include "../common/repositories/adventure_members_repository.h"
 
 extern QueryServ* QServ;
 extern Zone* zone;
@@ -826,6 +827,10 @@ void Client::CompleteConnect()
 		if (IsPetNameChangeAllowed() && !RuleB(Pets, AlwaysAllowPetRename)) {
 			InvokeChangePetName(false);
 		}
+
+		if (IsNameChangeAllowed() && !RuleB(Character, AlwaysAllowNameChange)) {
+			InvokeChangeNameWindow(false);
+		}
 	}
 
 	if(ClientVersion() == EQ::versions::ClientVersion::RoF2 && RuleB(Parcel, EnableParcelMerchants)) {
@@ -909,11 +914,14 @@ void Client::CompleteConnect()
 
 	SendDynamicZoneUpdates();
 
-	/** Request adventure info **/
-	auto pack = new ServerPacket(ServerOP_AdventureDataRequest, 64);
-	strcpy((char*)pack->pBuffer, GetName());
-	worldserver.SendPacket(pack);
-	delete pack;
+	// Request adventure info
+	auto members = AdventureMembersRepository::GetWhere(database, fmt::format("charid = {}", CharacterID()));
+	if (!members.empty()) {
+		auto pack = new ServerPacket(ServerOP_AdventureDataRequest, 64);
+		strcpy((char*)pack->pBuffer, GetName());
+		worldserver.SendPacket(pack);
+		delete pack;
+	}
 
 	if (IsClient() && CastToClient()->ClientVersionBit() & EQ::versions::maskUFAndLater) {
 		EQApplicationPacket *outapp = MakeBuffsPacket(false);
@@ -4552,14 +4560,14 @@ void Client::Handle_OP_ChangePetName(const EQApplicationPacket *app) {
 
 	auto p = (ChangePetName_Struct *) app->pBuffer;
 	if (!IsPetNameChangeAllowed()) {
-		p->response_code = ChangePetNameResponse::NotEligible;
+		p->response_code = ChangeNameResponse::Ineligible;
 		QueuePacket(app);
 		return;
 	}
 
-	p->response_code = ChangePetNameResponse::Denied;
+	p->response_code = ChangeNameResponse::Denied;
 	if (ChangePetName(p->new_pet_name)) {
-		p->response_code = ChangePetNameResponse::Accepted;
+		p->response_code = ChangeNameResponse::Accepted;
 	}
 
 	QueuePacket(app);
@@ -6780,6 +6788,21 @@ void Client::Handle_OP_GMLastName(const EQApplicationPacket *app)
 
 void Client::Handle_OP_GMNameChange(const EQApplicationPacket *app)
 {
+	if (app->size == sizeof(AltChangeName_Struct)) {
+		auto p = (AltChangeName_Struct *) app->pBuffer;
+
+		if (!IsNameChangeAllowed()) {
+			p->response_code = ChangeNameResponse::Ineligible;
+			QueuePacket(app);
+			return;
+		}
+
+		p->response_code = ChangeFirstName(p->new_name) ? ChangeNameResponse::Accepted : ChangeNameResponse::Denied;
+		QueuePacket(app);
+
+		return;
+	}
+
 	if (app->size != sizeof(GMName_Struct)) {
 		LogError("Wrong size: OP_GMNameChange, size=[{}], expected [{}]", app->size, sizeof(GMName_Struct));
 		return;
@@ -7657,7 +7680,11 @@ void Client::Handle_OP_GuildBank(const EQApplicationPacket *app)
 						log.char_id  = CharacterID();
 						log.guild_id = GuildID();
 						log.item_id  = inst->GetID();
-						log.quantity = inst->GetCharges();
+						log.quantity = 1;
+						if (inst->GetCharges() > 0 || inst->IsStackable() || inst->GetItem()->MaxCharges > 0) {
+							log.quantity = inst->GetCharges();
+						}
+
 						if (inst->IsAugmented()) {
 							auto augs          = inst->GetAugmentIDs();
 							log.aug_slot_one   = augs.at(0);
@@ -7741,7 +7768,11 @@ void Client::Handle_OP_GuildBank(const EQApplicationPacket *app)
 			item.guild_id    = GuildID();
 			item.area        = GuildBankDepositArea;
 			item.item_id     = cursor_item->ID;
-			item.quantity    = cursor_item_inst->GetCharges();
+			item.quantity    = 1;
+			if (cursor_item_inst->GetCharges() > 0 || cursor_item_inst->IsStackable() || cursor_item->MaxCharges > 0) {
+				item.quantity = cursor_item_inst->GetCharges();
+			}
+
 			item.donator     = GetCleanName();
 			item.permissions = GuildBankBankerOnly;
 			if (cursor_item_inst->IsAugmented()) {
@@ -7825,12 +7856,9 @@ void Client::Handle_OP_GuildBank(const EQApplicationPacket *app)
 				break;
 			}
 
-			if (inst->GetCharges() > 0) {
+			gbwis->Quantity = 1;
+			if (inst->GetCharges() > 0 || inst->IsStackable() || inst->GetItem()->MaxCharges > 0) {
 				gbwis->Quantity = inst->GetCharges();
-			}
-
-			if (inst->GetCharges() < 0) {
-				gbwis->Quantity = 1;
 			}
 
 			PushItemOnCursor(*inst.get());
@@ -7960,7 +7988,7 @@ void Client::Handle_OP_GuildCreate(const EQApplicationPacket *app)
 	}
 
 	SetGuildID(new_guild_id);
-	SendGuildList();
+	UpdateWho();
 	guild_mgr.MemberAdd(new_guild_id, CharacterID(), GetLevel(), GetClass(), GUILD_LEADER, GetZoneID(), GetName());
 	guild_mgr.SendGuildRefresh(new_guild_id, true, true, true, true);
 	guild_mgr.SendToWorldSendGuildList();
@@ -8129,7 +8157,7 @@ void Client::Handle_OP_GuildInvite(const EQApplicationPacket *app)
 	if (!invitee) {
 		Message(
 			Chat::Red,
-			"Prospective guild member %s must be in zone to preform guild operations on them.",
+			"Prospective guild member %s must be in zone to perform guild operations on them.",
 			gc->othername
 		);
 		return;
@@ -11042,7 +11070,7 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 		if (!target)
 			break;
 
-		if (RuleB(Map, CheckForLoSCheat) && (!DoLosChecks(target) || !CheckLosCheat(target))) {
+		if (RuleB(Pets, PetsRequireLoS) && !DoLosChecks(target)) {
 			mypet->SayString(this, NOT_LEGAL_TARGET);
 			break;
 		}
@@ -11110,7 +11138,7 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 			break;
 		}
 
-		if (RuleB(Map, CheckForLoSCheat) && (!DoLosChecks(GetTarget()) || !CheckLosCheat(GetTarget()))) {
+		if (RuleB(Pets, PetsRequireLoS) && !DoLosChecks(GetTarget())) {
 			mypet->SayString(this, NOT_LEGAL_TARGET);
 			break;
 		}
@@ -15462,7 +15490,7 @@ void Client::Handle_OP_TraderBuy(const EQApplicationPacket *app)
 			);
 			Message(
 				Chat::Yellow,
-				"Direct inventory delivey is not yet implemented.  Please visit the vendor directly or purchase via parcel delivery."
+				"Direct inventory delivery is not yet implemented.  Please visit the vendor directly or purchase via parcel delivery."
 			);
 			in->method     = BazaarByDirectToInventory;
 			in->sub_action = Failed;
@@ -16978,7 +17006,7 @@ void Client::Handle_OP_GuildTributeDonateItem(const EQApplicationPacket *app)
 
 		SendGuildTributeDonateItemReply(in, favor);
 
-		if(player_event_logs.IsEventEnabled(PlayerEvent::GUILD_TRIBUTE_DONATE_ITEM)) {
+		if(inst && player_event_logs.IsEventEnabled(PlayerEvent::GUILD_TRIBUTE_DONATE_ITEM)) {
 			auto e = PlayerEvent::GuildTributeDonateItem{ .item_id      = inst->GetID(),
 														  .augment_1_id = inst->GetAugmentItemID(0),
 														  .augment_2_id = inst->GetAugmentItemID(1),

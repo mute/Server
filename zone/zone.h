@@ -197,6 +197,13 @@ public:
 	int32 MobsAggroCount() { return aggroedmobs; }
 	DynamicZone *GetDynamicZone();
 
+	void ClearVariables();
+	bool DeleteVariable(const std::string& variable_name);
+	std::string GetVariable(const std::string& variable_name);
+	std::vector<std::string> GetVariables();
+	void SetVariable(const std::string& variable_name, const std::string& variable_value);
+	bool VariableExists(const std::string& variable_name);
+
 	IPathfinder                                   *pathing;
 	std::vector<NPC_Emote_Struct *>               npc_emote_list;
 	LinkedList<Spawn2 *>                          spawn2_list;
@@ -243,6 +250,8 @@ public:
 	std::unordered_map<uint32, EXPModifier> exp_modifiers;
 
 	std::vector<uint32> discovered_items;
+
+	std::map<std::string, std::string> m_zone_variables;
 
 	time_t weather_timer;
 	Timer  spawn2_timer;
@@ -343,6 +352,9 @@ public:
 	Timer GetInitgridsTimer();
 	uint32 GetInstanceTimeRemaining() const;
 	void SetInstanceTimeRemaining(uint32 instance_time_remaining);
+
+	inline bool GetSaveZoneState() const { return m_save_zone_state; }
+	inline void SetSaveZoneState(bool save_state) { m_save_zone_state = save_state; }
 
 	/**
 	 * GMSay Callback for LogSys
@@ -464,12 +476,14 @@ public:
 	inline uint32 GetZoneServerId() const { return m_zone_server_id; }
 
 	// zone state
+	bool LoadZoneVariablesState();
 	bool LoadZoneState(
 		std::unordered_map<uint32, uint32> spawn_times,
 		std::vector<Spawn2DisabledRepository::Spawn2Disabled> disabled_spawns
 	);
 	void SaveZoneState();
 	static void ClearZoneState(uint32 zone_id, uint32 instance_id);
+	void ReloadMaps();
 
 private:
 	bool      allow_mercs;
@@ -506,6 +520,7 @@ private:
 	uint32    m_last_ucss_update;
 	bool      m_idle_when_empty;
 	uint32    m_seconds_before_idle;
+	bool      m_save_zone_state;
 
 	GlobalLootManager                   m_global_loot;
 	LinkedList<ZoneClientAuth_Struct *> client_auth_list;

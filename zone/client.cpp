@@ -882,9 +882,13 @@ void Client::SendZoneInPackets()
 		//SendGuildMembers();
 		SendGuildURL();
 		SendGuildChannel();
-		SendGuildLFGuildStatus();
+		if (RuleB(Guild, EnableLFGuild)) {
+			SendGuildLFGuildStatus();
+		}
 	}
-	SendLFGuildStatus();
+	if (RuleB(Guild, EnableLFGuild)) {
+		SendLFGuildStatus();
+	}
 
 	//No idea why live sends this if even were not in a guild
 	SendGuildMOTD();
@@ -991,6 +995,8 @@ bool Client::Save(uint8 iCommitNow) {
 	if(!ClientDataLoaded())
 		return false;
 
+	BenchTimer timer;
+
 	/* Wrote current basics to PP for saves */
 	if (!m_lock_save_position) {
 		m_pp.x       = m_Position.x;
@@ -1017,6 +1023,8 @@ bool Client::Save(uint8 iCommitNow) {
 		m_pp.mana      = current_mana;
 		m_pp.endurance = current_endurance;
 	}
+
+	database.TransactionBegin();
 
 	/* Save Character Currency */
 	database.SaveCharacterCurrency(CharacterID(), &m_pp);
@@ -1100,6 +1108,10 @@ bool Client::Save(uint8 iCommitNow) {
 	if (RuleB(Bots, Enabled)) {
 		database.botdb.SaveBotSettings(this);
 	}
+
+	database.TransactionCommit();
+
+	LogInfo("Save for [{}] took [{}]", GetCleanName(), timer.elapsed());
 
 	return true;
 }
@@ -1204,6 +1216,58 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 	strn0cpy(message, orig_message, sizeof(message));
 
 	LogDebug("Client::ChannelMessageReceived() Channel:[{}] message:[{}]", chan_num, message);
+
+	if (RuleB(Chat, AlwaysCaptureCommandText)) {
+		if (message[0] == COMMAND_CHAR) {
+			if (command_dispatch(this, message, false) == -2) {
+				if (parse->PlayerHasQuestSub(EVENT_COMMAND)) {
+					int i = parse->EventPlayer(EVENT_COMMAND, this, message, 0);
+					if (i == 0 && !RuleB(Chat, SuppressCommandErrors)) {
+						Message(Chat::Red, "Command '%s' not recognized.", message);
+					}
+				}
+				else if (parse->PlayerHasQuestSub(EVENT_SAY)) {
+					int i = parse->EventPlayer(EVENT_SAY, this, message, 0);
+					if (i == 0 && !RuleB(Chat, SuppressCommandErrors)) {
+						Message(Chat::Red, "Command '%s' not recognized.", message);
+					}
+				}
+				else {
+					if (!RuleB(Chat, SuppressCommandErrors)) {
+						Message(Chat::Red, "Command '%s' not recognized.", message);
+					}
+				}
+			}
+			return;
+		}
+
+		if (message[0] == BOT_COMMAND_CHAR) {
+			if (RuleB(Bots, Enabled)) {
+				if (bot_command_dispatch(this, message) == -2) {
+					if (parse->PlayerHasQuestSub(EVENT_BOT_COMMAND)) {
+						int i = parse->EventPlayer(EVENT_BOT_COMMAND, this, message, 0);
+						if (i == 0 && !RuleB(Chat, SuppressCommandErrors)) {
+							Message(Chat::Red, "Bot command '%s' not recognized.", message);
+						}
+					}
+					else if (parse->PlayerHasQuestSub(EVENT_SAY)) {
+						int i = parse->EventPlayer(EVENT_SAY, this, message, 0);
+						if (i == 0 && !RuleB(Chat, SuppressCommandErrors)) {
+							Message(Chat::Red, "Bot command '%s' not recognized.", message);
+						}
+					}
+					else {
+						if (!RuleB(Chat, SuppressCommandErrors)) {
+							Message(Chat::Red, "Bot command '%s' not recognized.", message);
+						}
+					}
+				}
+			} else {
+				Message(Chat::Red, "Bots are disabled on this server.");
+			}
+			return;
+		}
+	}
 
 	if (targetname == nullptr) {
 		targetname = (!GetTarget()) ? "" : GetTarget()->GetName();
@@ -2549,40 +2613,59 @@ void Client::ChangeLastName(std::string last_name) {
 	safe_delete(outapp);
 }
 
-bool Client::ChangeFirstName(const char* in_firstname, const char* gmname)
+// Deprecated, this packet does not actually work in ROF2
+bool Client::ChangeFirstName(const std::string in_firstname, const std::string gmname)
 {
-	// check duplicate name
-	bool used_name = database.IsNameUsed((const char*) in_firstname);
-	if (used_name) {
+	if (!ChangeFirstName(in_firstname)) {
 		return false;
 	}
-
-	// update character_
-	if(!database.UpdateName(GetName(), in_firstname))
-		return false;
-
-	// update pp
-	memset(m_pp.name, 0, sizeof(m_pp.name));
-	snprintf(m_pp.name, sizeof(m_pp.name), "%s", in_firstname);
-	strcpy(name, m_pp.name);
-	Save();
 
 	// send name update packet
 	auto outapp = new EQApplicationPacket(OP_GMNameChange, sizeof(GMName_Struct));
 	GMName_Struct* gmn=(GMName_Struct*)outapp->pBuffer;
-	strn0cpy(gmn->gmname,gmname,64);
+	strn0cpy(gmn->gmname,gmname.c_str(),64);
 	strn0cpy(gmn->oldname,GetName(),64);
-	strn0cpy(gmn->newname,in_firstname,64);
+	strn0cpy(gmn->newname,in_firstname.c_str(),64);
 	gmn->unknown[0] = 1;
 	gmn->unknown[1] = 1;
 	gmn->unknown[2] = 1;
 	entity_list.QueueClients(this, outapp, false);
 	safe_delete(outapp);
 
+	// success
+	return true;
+}
+
+bool Client::ChangeFirstName(const std::string in_firstname)
+{
+	// check duplicate name
+	bool used_name = database.IsNameUsed(in_firstname) || database.IsPetNameUsed(in_firstname);
+	if (used_name || !database.CheckNameFilter(in_firstname, false)) {
+		return false;
+	}
+
+	// update character_
+	if(!database.UpdateNameByID(CharacterID(), in_firstname))
+		return false;
+
+	// Send Name Update to Clients
+	SendRename(this, GetName(), in_firstname.c_str());
+	SetName(in_firstname.c_str());
+
+	// update pp
+	memset(m_pp.name, 0, sizeof(m_pp.name));
+	snprintf(m_pp.name, sizeof(m_pp.name), "%s", in_firstname.c_str());
+	strcpy(name, m_pp.name);
+	Save();
+
+	// Update the active char in account table
+	database.UpdateLiveChar(in_firstname, AccountID());
+
 	// finally, update the /who list
 	UpdateWho();
 
 	// success
+	ClearNameChange();
 	return true;
 }
 
@@ -4735,6 +4818,57 @@ bool Client::KeyRingRemove(uint32 item_id)
 			item_id
 		)
 	);
+}
+
+bool Client::IsNameChangeAllowed() {
+	if (RuleB(Character, AlwaysAllowNameChange)) {
+		return true;
+	}
+
+	auto k = GetScopedBucketKeys();
+	k.key = "name_change_allowed";
+
+	auto b = DataBucket::GetData(k);
+	if (!b.value.empty()) {
+		return true;
+	}
+
+	return false;
+}
+
+bool Client::ClearNameChange() {
+	if (!IsNameChangeAllowed()) {
+		return false;
+	}
+
+	auto k = GetScopedBucketKeys();
+	k.key = "name_change_allowed";
+
+	DataBucket::DeleteData(k);
+
+	return true;
+}
+
+void Client::InvokeChangeNameWindow(bool immediate) {
+	if (!IsNameChangeAllowed()) {
+		return;
+	}
+
+	auto packet_op = immediate ? OP_InvokeNameChangeImmediate : OP_InvokeNameChangeLazy;
+
+	auto outapp = new EQApplicationPacket(packet_op, 0);
+	QueuePacket(outapp);
+	safe_delete(outapp);
+}
+
+void Client::GrantNameChange() {
+
+	auto k = GetScopedBucketKeys();
+	k.key = "name_change_allowed";
+	k.value = "allowed"; // potentially put a timestamp here
+	DataBucket::SetData(k);
+
+	InvokeChangeNameWindow(true);
 }
 
 bool Client::IsPetNameChangeAllowed() {
